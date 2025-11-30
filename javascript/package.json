@@ -12,6 +12,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@vueup/vue-quill": "^1.2.0",
+    "axios": "^1.7.9",
     "bootstrap": "^5.3.8",
     "cors": "^2.8.5",
     "router": "^2.2.0",
