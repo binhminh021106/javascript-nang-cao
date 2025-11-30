@@ -1,10 +1,9 @@
 <script setup>
 import { ref, computed, onMounted, reactive, onBeforeUnmount } from 'vue';
 import { io } from 'socket.io-client';
-// 1. IMPORT SWEETALERT2
 import Swal from 'sweetalert2';
 
-// --- CẤU HÌNH TOAST (Thông báo góc phải) ---
+// --- CẤU HÌNH TOAST ---
 const Toast = Swal.mixin({
   toast: true,
   position: 'top-end',
@@ -38,10 +37,20 @@ const formData = reactive({
   name: '',
   price: 0,
   description: '',
-  images: [], 
-  imageFiles: [], 
+  images: [],
+  imageFiles: [],
   status: 1
 });
+
+// --- HELPER FUNCTION (MỚI THÊM) ---
+const stripHtml = (html) => {
+  if (!html) return "Chưa có mô tả";
+  const tmp = document.createElement("DIV");
+  tmp.innerHTML = html;
+  let text = tmp.textContent || tmp.innerText || "";
+  text = text.replace(/\s+/g, ' ').trim();
+  return text.length > 60 ? text.substring(0, 60) + "..." : text;
+};
 
 // --- COMPUTED ---
 const products = computed(() => {
@@ -73,7 +82,7 @@ const pageInfo = computed(() => {
 
 const handleFileUpload = (event) => {
   const files = Array.from(event.target.files);
-  
+
   files.forEach(file => {
     if (!file.type.startsWith('image/')) {
       Toast.fire({
@@ -124,11 +133,12 @@ const openModal = (mode, product = null) => {
     Object.assign(formData, { id: null, name: '', price: 0, description: '', images: [], imageFiles: [], status: 1 });
   } else if (product) {
     const imgs = product.image ? product.image.split(",") : [];
-    Object.assign(formData, { 
-      ...product, 
-      images: imgs, 
-      imageFiles: [] 
+    Object.assign(formData, {
+      ...product,
+      images: imgs,
+      imageFiles: []
     });
+    if (!formData.description) formData.description = '';
   }
   isModalVisible.value = true;
   document.body.style.overflow = "hidden";
@@ -157,7 +167,7 @@ const handleSubmit = async () => {
       formData.imageFiles.forEach(file => {
         payload.append('images', file);
       });
-      payload.append('keepOldImages', 'false'); 
+      payload.append('keepOldImages', 'false');
     } else {
       payload.append('keepOldImages', 'true');
     }
@@ -173,7 +183,7 @@ const handleSubmit = async () => {
     }
 
     closeModal();
-    
+
     Toast.fire({
       icon: 'success',
       title: modalMode.value === 'add' ? 'Thêm mới thành công!' : 'Cập nhật thành công!'
@@ -199,7 +209,7 @@ const handleDelete = async (product) => {
     icon: 'warning',
     showCancelButton: true,
     confirmButtonColor: '#d33',
-    cancelButtonColor: '#3085d6', 
+    cancelButtonColor: '#3085d6',
     confirmButtonText: 'Vâng, xóa đi!',
     cancelButtonText: 'Hủy bỏ'
   });
@@ -209,7 +219,7 @@ const handleDelete = async (product) => {
   try {
     const res = await fetch(`/api/products/${product.id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error("Lỗi khi xóa sản phẩm");
-    
+
     Toast.fire({
       icon: 'success',
       title: 'Đã xóa sản phẩm!'
@@ -339,8 +349,10 @@ onBeforeUnmount(() => {
                   <div>
                     <div class="font-semibold text-gray-900 group-hover:text-black group-hover:underline">{{
                       product.name }}</div>
-                    <div class="text-gray-500 text-xs mt-0.5 truncate max-w-[200px]">#{{ product.id }} - {{
-                      product.description || 'Chưa có mô tả' }}</div>
+                    <!-- ĐÃ SỬA: Dùng stripHtml thay vì v-html để chỉ hiển thị text -->
+                    <div class="text-gray-500 text-xs mt-0.5 truncate max-w-[200px]">
+                      {{ stripHtml(product.description) }}
+                    </div>
                   </div>
                 </div>
               </td>
@@ -420,10 +432,8 @@ onBeforeUnmount(() => {
               'grid-cols-2': formData.images.length === 2,
               'grid-cols-3': formData.images.length >= 3
             }">
-              <img v-for="(img, idx) in formData.images" :key="idx" 
-                :src="img || placeholderImage(formData.name)"
-                class="w-full aspect-square object-cover rounded-lg border border-gray-200" 
-                @error="handleImageError">
+              <img v-for="(img, idx) in formData.images" :key="idx" :src="img || placeholderImage(formData.name)"
+                class="w-full aspect-square object-cover rounded-lg border border-gray-200" @error="handleImageError">
             </div>
             <div v-else class="w-full aspect-video bg-gray-100 rounded-lg flex items-center justify-center">
               <span class="text-gray-400 text-sm">Không có ảnh</span>
@@ -446,26 +456,30 @@ onBeforeUnmount(() => {
             </div>
             <div>
               <label class="text-xs font-bold text-gray-400 uppercase">Mô tả</label>
-              <p class="text-gray-600 text-sm bg-gray-50 p-3 rounded-lg">{{ formData.description || 'Không có' }}</p>
+              <!-- Sử dụng v-html để hiển thị nội dung từ editor -->
+              <div class="text-gray-600 text-sm bg-gray-50 p-3 rounded-lg ql-editor"
+                v-html="formData.description || 'Không có'"></div>
             </div>
           </div>
 
           <!-- FORM (ADD / EDIT) -->
           <form v-else @submit.prevent="handleSubmit" class="space-y-5">
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Tên <span class="text-red-500">*</span></label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Tên Sản Phẩm <span
+                  class="text-red-500">*</span></label>
               <input v-model="formData.name" type="text" required
                 class="w-full px-4 py-2 border rounded-lg focus:border-black focus:ring-1 focus:ring-black outline-none" />
             </div>
 
             <div class="grid grid-cols-2 gap-5">
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Giá (VNĐ) <span class="text-red-500">*</span></label>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Giá (VNĐ) <span
+                    class="text-red-500">*</span></label>
                 <input v-model.number="formData.price" type="number" required
                   class="w-full px-4 py-2 border rounded-lg focus:border-black outline-none" />
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Trạng thái</label>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Trạng Thái</label>
                 <select v-model="formData.status"
                   class="w-full px-4 py-2 border rounded-lg focus:border-black outline-none bg-white">
                   <option :value="1">Đang bán</option>
@@ -476,10 +490,10 @@ onBeforeUnmount(() => {
 
             <!-- Upload nhiều ảnh -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Hình ảnh (Nhiều ảnh)</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Hình Ảnh (Nhiều ảnh)</label>
               <input type="file" ref="fileInput" @change="handleFileUpload" accept="image/*" multiple
                 class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 cursor-pointer" />
-              
+
               <!-- Preview nhiều ảnh -->
               <div v-if="formData.images.length > 0" class="grid grid-cols-4 gap-2 mt-3">
                 <div v-for="(img, idx) in formData.images" :key="idx" class="relative group">
@@ -492,10 +506,13 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
+            <!-- QUILLE EDITOR THAY THẾ TEXTAREA -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Mô tả</label>
-              <textarea v-model="formData.description" rows="3"
-                class="w-full px-4 py-2 border rounded-lg focus:border-black outline-none"></textarea>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Mô Tả</label>
+              <div class="editor-wrapper border rounded-lg overflow-hidden bg-white">
+                <QuillEditor theme="snow" v-model:content="formData.description" contentType="html" toolbar="full"
+                  placeholder="Nhập mô tả chi tiết sản phẩm..." />
+              </div>
             </div>
 
             <div class="pt-4 border-t flex justify-end gap-3">
@@ -521,6 +538,7 @@ onBeforeUnmount(() => {
     opacity: 0;
     transform: translateY(10px) scale(0.98);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -529,5 +547,34 @@ onBeforeUnmount(() => {
 
 .animate-fade-in-up {
   animation: fadeInUp 0.2s ease-out forwards;
+}
+
+:deep(.ql-editor) {
+  min-height: 150px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+:deep(.ql-toolbar) {
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-bottom: 1px solid #e5e7eb !important;
+  background-color: #f9fafb;
+}
+
+:deep(.ql-container) {
+  border: none !important;
+  font-family: inherit;
+}
+
+.editor-wrapper {
+  border: 1px solid #e5e7eb;
+  transition: all 0.2s;
+}
+
+.editor-wrapper:focus-within {
+  border-color: #000;
+  box-shadow: 0 0 0 1px #000;
 }
 </style>
