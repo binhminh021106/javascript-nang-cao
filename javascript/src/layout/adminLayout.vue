@@ -17,33 +17,30 @@
 
         <p class="px-6 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Quản lý</p>
 
-        <!-- Link 1: Sản phẩm -->
         <router-link to="/admin/products"
-          class="flex items-center px-6 py-3 text-sm font-medium transition-colors relative group"
-          active-class="bg-gray-100 text-black border-r-4 border-black">
+          class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:text-black transition-colors relative group"
+          active-class="bg-gray-100 !text-black border-r-4 border-black">
           <i
             class="fa-solid fa-box-open w-6 text-center mr-2 text-gray-400 group-hover:text-black group-[.router-link-active]:text-black transition-colors"></i>
           Sản phẩm
         </router-link>
 
         <router-link to="/admin/categories"
-          class="flex items-center px-6 py-3 text-sm font-medium transition-colors relative group"
-          active-class="bg-gray-100 text-black border-r-4 border-black">
+          class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:text-black transition-colors relative group"
+          active-class="bg-gray-100 !text-black border-r-4 border-black">
           <i
-            class="fa-solid fa-box-open w-6 text-center mr-2 text-gray-400 group-hover:text-black group-[.router-link-active]:text-black transition-colors"></i>
+            class="fa-solid fa-layer-group w-6 text-center mr-2 text-gray-400 group-hover:text-black group-[.router-link-active]:text-black transition-colors"></i>
           Danh mục
         </router-link>
 
-        <!-- Link 2: Khách hàng -->
         <a href="#"
-          class="flex items-center px-6 py-3 text-sm font-medium text-gray-500 hover:bg-gray-50 hover:text-black transition-colors group">
+          class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-black transition-colors group">
           <i class="fa-solid fa-users w-6 text-center mr-2 text-gray-400 group-hover:text-black transition-colors"></i>
           Khách hàng
         </a>
 
-        <!-- Link 3: Báo cáo -->
         <a href="#"
-          class="flex items-center px-6 py-3 text-sm font-medium text-gray-500 hover:bg-gray-50 hover:text-black transition-colors group">
+          class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-black transition-colors group">
           <i
             class="fa-solid fa-chart-pie w-6 text-center mr-2 text-gray-400 group-hover:text-black transition-colors"></i>
           Báo cáo doanh thu
@@ -54,7 +51,7 @@
         <p class="px-6 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Hệ thống</p>
 
         <a href="#"
-          class="flex items-center px-6 py-3 text-sm font-medium text-gray-500 hover:bg-gray-50 hover:text-black transition-colors group">
+          class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-black transition-colors group">
           <i class="fa-solid fa-gear w-6 text-center mr-2 text-gray-400 group-hover:text-black transition-colors"></i>
           Cài đặt
         </a>

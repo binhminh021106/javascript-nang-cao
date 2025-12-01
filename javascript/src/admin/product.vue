@@ -26,23 +26,34 @@ const isSubmitting = ref(false);
 const currentPage = ref(1);
 const searchQuery = ref("");
 const filterStatus = ref("");
+const categories = ref([]); 
 
 const fileInput = ref(null);
 
 // Modal State
 const isModalVisible = ref(false);
 const modalMode = ref('view');
+
+// Form Data
 const formData = reactive({
   id: null,
   name: '',
   price: 0,
   description: '',
+  category_id: null, 
   images: [],
   imageFiles: [],
   status: 1
 });
 
-// --- HELPER FUNCTION (MỚI THÊM) ---
+// State lỗi (Validation)
+const errors = reactive({
+  name: '',
+  price: '',
+  category_id: ''
+});
+
+// --- HELPER FUNCTION ---
 const stripHtml = (html) => {
   if (!html) return "Chưa có mô tả";
   const tmp = document.createElement("DIV");
@@ -50,6 +61,47 @@ const stripHtml = (html) => {
   let text = tmp.textContent || tmp.innerText || "";
   text = text.replace(/\s+/g, ' ').trim();
   return text.length > 60 ? text.substring(0, 60) + "..." : text;
+};
+
+// --- VALIDATION ---
+const validateForm = () => {
+  let isValid = true;
+  
+  // Reset lỗi cũ
+  errors.name = '';
+  errors.price = '';
+  errors.category_id = '';
+
+  // 1. Validate Tên
+  if (!formData.name || formData.name.trim() === '') {
+    errors.name = 'Vui lòng nhập tên sản phẩm.';
+    isValid = false;
+  }
+
+  // 2. Validate Giá
+  if (formData.price === '' || formData.price === null) {
+    errors.price = 'Vui lòng nhập giá bán.';
+    isValid = false;
+  } else if (Number(formData.price) < 0) {
+    errors.price = 'Giá bán không được nhỏ hơn 0.';
+    isValid = false;
+  }
+
+  // 3. Validate Danh mục (Tuỳ chọn: nếu bắt buộc phải chọn danh mục)
+  // Nếu bạn muốn bắt buộc chọn danh mục thì bỏ comment dòng dưới
+  /*
+  if (!formData.category_id) {
+    errors.category_id = 'Vui lòng chọn danh mục.';
+    isValid = false;
+  }
+  */
+
+  return isValid;
+};
+
+// Hàm xóa lỗi khi người dùng nhập liệu
+const clearError = (field) => {
+  if (errors[field]) errors[field] = '';
 };
 
 // --- COMPUTED ---
@@ -79,6 +131,17 @@ const pageInfo = computed(() => {
 });
 
 // --- METHODS ---
+
+const fetchCategoriesForDropdown = async () => {
+    try {
+        const res = await fetch('/api/categories-all');
+        if(res.ok) {
+            categories.value = await res.json();
+        }
+    } catch (e) {
+        console.error("Lỗi tải danh mục dropdown", e);
+    }
+};
 
 const handleFileUpload = (event) => {
   const files = Array.from(event.target.files);
@@ -129,12 +192,18 @@ const openModal = (mode, product = null) => {
   modalMode.value = mode;
   if (fileInput.value) fileInput.value.value = null;
 
+  // Reset errors khi mở modal
+  errors.name = '';
+  errors.price = '';
+  errors.category_id = '';
+
   if (mode === 'add') {
-    Object.assign(formData, { id: null, name: '', price: 0, description: '', images: [], imageFiles: [], status: 1 });
+    Object.assign(formData, { id: null, name: '', price: 0, description: '', category_id: null, images: [], imageFiles: [], status: 1 });
   } else if (product) {
     const imgs = product.image ? product.image.split(",") : [];
     Object.assign(formData, {
       ...product,
+      category_id: product.category_id,
       images: imgs,
       imageFiles: []
     });
@@ -150,6 +219,12 @@ const closeModal = () => {
 };
 
 const handleSubmit = async () => {
+  // GỌI HÀM VALIDATE TRƯỚC KHI XỬ LÝ
+  if (!validateForm()) {
+    // Toast.fire({ icon: 'warning', title: 'Vui lòng kiểm tra lại thông tin nhập!' });
+    return; 
+  }
+
   if (isSubmitting.value) return;
   isSubmitting.value = true;
 
@@ -162,6 +237,12 @@ const handleSubmit = async () => {
     payload.append('price', formData.price);
     payload.append('description', formData.description || '');
     payload.append('status', formData.status);
+    
+    if(formData.category_id) {
+        payload.append('category_id', formData.category_id);
+    } else {
+        payload.append('category_id', 'null');
+    }
 
     if (formData.imageFiles.length > 0) {
       formData.imageFiles.forEach(file => {
@@ -254,11 +335,16 @@ const handleImageError = (event) => {
 
 onMounted(() => {
   fetchData(currentPage.value);
+  fetchCategoriesForDropdown();
+  
   socket = io("http://localhost:8080");
   socket.on("connect", () => { console.log("✅ Socket connected:", socket.id); });
   socket.on("REFRESH_DATA", () => {
     console.log("📡 Nhận tín hiệu REFRESH_DATA");
     fetchData(currentPage.value);
+  });
+  socket.on("REFRESH_CATEGORIES", () => {
+      fetchCategoriesForDropdown();
   });
   socket.on("disconnect", () => { console.log("❌ Socket disconnected"); });
 });
@@ -318,6 +404,7 @@ onBeforeUnmount(() => {
           <thead class="bg-gray-50 text-gray-500 font-medium">
             <tr>
               <th class="px-6 py-4">Sản phẩm</th>
+              <th class="px-6 py-4">Danh mục</th>
               <th class="px-6 py-4">Giá bán</th>
               <th class="px-6 py-4">Trạng thái</th>
               <th class="px-6 py-4 text-right">Hành động</th>
@@ -327,14 +414,14 @@ onBeforeUnmount(() => {
           <tbody class="divide-y divide-gray-100">
 
             <tr v-if="isLoading">
-              <td colspan="4" class="px-6 py-10 text-center text-gray-400">
+              <td colspan="5" class="px-6 py-10 text-center text-gray-400">
                 <i class="fa-solid fa-circle-notch fa-spin text-2xl mb-2"></i>
                 <p>Đang tải dữ liệu...</p>
               </td>
             </tr>
 
             <tr v-else-if="products.length === 0">
-              <td colspan="4" class="px-6 py-10 text-center text-gray-400">
+              <td colspan="5" class="px-6 py-10 text-center text-gray-400">
                 <i class="fa-solid fa-box-open text-4xl mb-2 text-gray-300"></i>
                 <p>Không tìm thấy sản phẩm nào.</p>
               </td>
@@ -349,12 +436,18 @@ onBeforeUnmount(() => {
                   <div>
                     <div class="font-semibold text-gray-900 group-hover:text-black group-hover:underline">{{
                       product.name }}</div>
-                    <!-- ĐÃ SỬA: Dùng stripHtml thay vì v-html để chỉ hiển thị text -->
                     <div class="text-gray-500 text-xs mt-0.5 truncate max-w-[200px]">
                       {{ stripHtml(product.description) }}
                     </div>
                   </div>
                 </div>
+              </td>
+              
+              <td class="px-6 py-4 text-gray-600">
+                  <span v-if="product.category_name" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                      {{ product.category_name }}
+                  </span>
+                  <span v-else class="text-gray-400 italic text-xs">Chưa phân loại</span>
               </td>
 
               <td class="px-6 py-4 font-medium text-gray-900">
@@ -426,7 +519,7 @@ onBeforeUnmount(() => {
 
           <!-- VIEW MODE -->
           <div v-if="modalMode === 'view'" class="space-y-4">
-            <!-- Nhiều ảnh -->
+            <!-- Ảnh -->
             <div v-if="formData.images.length > 0" class="grid gap-2" :class="{
               'grid-cols-1': formData.images.length === 1,
               'grid-cols-2': formData.images.length === 2,
@@ -438,54 +531,103 @@ onBeforeUnmount(() => {
             <div v-else class="w-full aspect-video bg-gray-100 rounded-lg flex items-center justify-center">
               <span class="text-gray-400 text-sm">Không có ảnh</span>
             </div>
+            
+            <!-- Thông tin Text -->
             <div>
               <label class="text-xs font-bold text-gray-400 uppercase">Tên</label>
               <p class="text-lg font-bold text-gray-900">{{ formData.name }}</p>
             </div>
+
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="text-xs font-bold text-gray-400 uppercase">Giá</label>
                 <p class="text-xl font-bold">{{ formatPrice(formData.price) }}</p>
               </div>
               <div>
-                <label class="text-xs font-bold text-gray-400 uppercase">Trạng thái</label>
-                <span class="inline-block px-2 py-1 bg-gray-100 rounded text-sm font-medium">
-                  {{ formData.status === 1 ? 'Đang bán' : 'Hết hàng' }}
-                </span>
+                  <label class="text-xs font-bold text-gray-400 uppercase">Danh mục</label>
+                  <p class="font-medium">
+                      {{ formData.category_name || categories.find(c => c.id == formData.category_id)?.name || 'Chưa phân loại' }}
+                  </p>
               </div>
             </div>
+
+             <!-- Trạng thái -->
+             <div>
+                <label class="text-xs font-bold text-gray-400 uppercase">Trạng thái</label>
+                <div>
+                    <span class="inline-block px-2 py-1 bg-gray-100 rounded text-sm font-medium">
+                    {{ formData.status === 1 ? 'Đang bán' : 'Hết hàng' }}
+                    </span>
+                </div>
+             </div>
+
             <div>
               <label class="text-xs font-bold text-gray-400 uppercase">Mô tả</label>
-              <!-- Sử dụng v-html để hiển thị nội dung từ editor -->
               <div class="text-gray-600 text-sm bg-gray-50 p-3 rounded-lg ql-editor"
                 v-html="formData.description || 'Không có'"></div>
             </div>
           </div>
 
           <!-- FORM (ADD / EDIT) -->
-          <form v-else @submit.prevent="handleSubmit" class="space-y-5">
+          <form v-else @submit.prevent="handleSubmit" class="space-y-5" novalidate>
+            <!-- 
+                Đã bỏ thuộc tính 'required' ở các input
+                Thay vào đó là hiển thị lỗi từ biến 'errors'
+            -->
+            
+            <!-- TÊN SẢN PHẨM -->
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Tên Sản Phẩm <span
                   class="text-red-500">*</span></label>
-              <input v-model="formData.name" type="text" required
-                class="w-full px-4 py-2 border rounded-lg focus:border-black focus:ring-1 focus:ring-black outline-none" />
+              <input 
+                v-model="formData.name" 
+                type="text" 
+                @input="clearError('name')"
+                :class="{'border-red-500 focus:border-red-500 focus:ring-red-200': errors.name}"
+                class="w-full px-4 py-2 border rounded-lg focus:border-black focus:ring-1 focus:ring-black outline-none transition" 
+              />
+              <span v-if="errors.name" class="text-red-500 text-xs mt-1 block">{{ errors.name }}</span>
             </div>
 
             <div class="grid grid-cols-2 gap-5">
+              <!-- GIÁ BÁN -->
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">Giá (VNĐ) <span
                     class="text-red-500">*</span></label>
-                <input v-model.number="formData.price" type="number" required
-                  class="w-full px-4 py-2 border rounded-lg focus:border-black outline-none" />
+                <input 
+                    v-model.number="formData.price" 
+                    type="number" 
+                    @input="clearError('price')"
+                    :class="{'border-red-500 focus:border-red-500 focus:ring-red-200': errors.price}"
+                    class="w-full px-4 py-2 border rounded-lg focus:border-black focus:ring-1 focus:ring-black outline-none transition" 
+                />
+                <span v-if="errors.price" class="text-red-500 text-xs mt-1 block">{{ errors.price }}</span>
               </div>
+              
+              <!-- SELECT DANH MỤC -->
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Trạng Thái</label>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Danh Mục</label>
+                <select 
+                    v-model="formData.category_id"
+                    @change="clearError('category_id')"
+                    :class="{'border-red-500 focus:border-red-500 focus:ring-red-200': errors.category_id}"
+                    class="w-full px-4 py-2 border rounded-lg focus:border-black outline-none bg-white transition">
+                  <option :value="null">-- Chưa phân loại --</option>
+                  <option v-for="cat in categories" :key="cat.id" :value="cat.id">
+                      {{ cat.name }}
+                  </option>
+                </select>
+                <span v-if="errors.category_id" class="text-red-500 text-xs mt-1 block">{{ errors.category_id }}</span>
+              </div>
+            </div>
+
+            <div>
+                 <label class="block text-sm font-medium text-gray-700 mb-1">Trạng Thái</label>
                 <select v-model="formData.status"
                   class="w-full px-4 py-2 border rounded-lg focus:border-black outline-none bg-white">
                   <option :value="1">Đang bán</option>
                   <option :value="0">Hết hàng</option>
                 </select>
-              </div>
             </div>
 
             <!-- Upload nhiều ảnh -->
@@ -494,7 +636,6 @@ onBeforeUnmount(() => {
               <input type="file" ref="fileInput" @change="handleFileUpload" accept="image/*" multiple
                 class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 cursor-pointer" />
 
-              <!-- Preview nhiều ảnh -->
               <div v-if="formData.images.length > 0" class="grid grid-cols-4 gap-2 mt-3">
                 <div v-for="(img, idx) in formData.images" :key="idx" class="relative group">
                   <img :src="img" class="w-full h-20 object-cover rounded border">
@@ -506,7 +647,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- QUILLE EDITOR THAY THẾ TEXTAREA -->
+            <!-- QUILLE EDITOR -->
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Mô Tả</label>
               <div class="editor-wrapper border rounded-lg overflow-hidden bg-white">
