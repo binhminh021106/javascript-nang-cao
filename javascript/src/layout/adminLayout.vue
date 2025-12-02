@@ -17,7 +17,7 @@
 
         <p class="px-6 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Quản lý</p>
 
-        <router-link to="/admin/products"
+        <router-link :to="{ name: 'AdminProducts'}"
           class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:text-black transition-colors relative group"
           active-class="bg-gray-100 !text-black border-r-4 border-black">
           <i
@@ -25,7 +25,7 @@
           Sản phẩm
         </router-link>
 
-        <router-link to="/admin/categories"
+        <router-link :to="{ name: 'AdminCategories'}"
           class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:text-black transition-colors relative group"
           active-class="bg-gray-100 !text-black border-r-4 border-black">
           <i
@@ -33,11 +33,11 @@
           Danh mục
         </router-link>
 
-        <a href="#"
+        <router-link :to="{ name: 'AdminUsers'}"
           class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-black transition-colors group">
           <i class="fa-solid fa-users w-6 text-center mr-2 text-gray-400 group-hover:text-black transition-colors"></i>
           Khách hàng
-        </a>
+        </router-link>
 
         <a href="#"
           class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-black transition-colors group">
