@@ -87,14 +87,10 @@ const validateForm = () => {
     isValid = false;
   }
 
-  // 3. Validate Danh mục (Tuỳ chọn: nếu bắt buộc phải chọn danh mục)
-  // Nếu bạn muốn bắt buộc chọn danh mục thì bỏ comment dòng dưới
-  /*
   if (!formData.category_id) {
     errors.category_id = 'Vui lòng chọn danh mục.';
     isValid = false;
   }
-  */
 
   return isValid;
 };
@@ -343,9 +339,9 @@ onMounted(() => {
     console.log("📡 Nhận tín hiệu REFRESH_DATA");
     fetchData(currentPage.value);
   });
-  socket.on("REFRESH_CATEGORIES", () => {
-      fetchCategoriesForDropdown();
-  });
+  // socket.on("REFRESH_CATEGORIES", () => {
+  //     fetchCategoriesForDropdown();
+  // });
   socket.on("disconnect", () => { console.log("❌ Socket disconnected"); });
 });
 
