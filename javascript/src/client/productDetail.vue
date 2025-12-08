@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 const route = useRoute();
@@ -10,65 +10,47 @@ const product = ref(null);
 const relatedProducts = ref([]);
 const isLoading = ref(false);
 const quantity = ref(1);
+const activeTab = ref('description');
+const isExpanded = ref(false);
 
-// Gallery Images
+// Gallery
 const mainImage = ref('');
 const galleryImages = ref([]); 
 
-// Expand Description
-const isExpanded = ref(false);
-
-// Tabs (Mô tả / Đánh giá / Bình luận)
-const activeTab = ref('description');
-
-// --- HELPER FUNCTIONS ---
+// --- HELPERS ---
 const formatCurrency = (amount) => {
   if (!amount && amount !== 0) return '0 ₫';
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
 };
 
-// [FIX 1] Hàm xử lý ảnh: Thêm domain backend nếu là ảnh upload
 const getFullImageUrl = (imgStr) => {
   if (!imgStr) return 'https://via.placeholder.com/500x500?text=No+Image';
   const s = imgStr.trim();
-  if (s.startsWith('http')) return s; // Nếu là link online thì giữ nguyên
-  // Nếu là tên file, nối thêm đường dẫn server uploads
-  return `http://localhost:8080/uploads/${s}`; 
+  return s.startsWith('http') ? s : `http://localhost:8080/uploads/${s}`;
 };
 
-// Hàm tách chuỗi ảnh thành mảng và xử lý URL
 const processImages = (imageString) => {
     if (!imageString) return ['https://via.placeholder.com/500x500?text=No+Image'];
-    
-    // Tách chuỗi -> map qua hàm getFullImageUrl để có link chuẩn
     let imgs = imageString.split(',').map(s => getFullImageUrl(s));
-    
-    if (imgs.length === 0) return ['https://via.placeholder.com/500x500?text=No+Image'];
-    return imgs;
+    return imgs.length ? imgs : ['https://via.placeholder.com/500x500?text=No+Image'];
 };
 
-// --- API CALLS ---
-
+// --- API ---
 const fetchProductDetail = async (id) => {
   isLoading.value = true;
   try {
     const res = await fetch(`http://localhost:8080/api/products/${id}`);
-    
-    if (!res.ok) {
-        if(res.status === 404) throw new Error("Sản phẩm không tồn tại");
-        throw new Error("Lỗi tải sản phẩm");
-    }
+    if (!res.ok) throw new Error(res.status === 404 ? "Sản phẩm không tồn tại" : "Lỗi tải sản phẩm");
     
     const data = await res.json();
     product.value = data;
     
-    // Xử lý ảnh Gallery
+    // Setup Gallery
     const images = processImages(data.image);
     galleryImages.value = images;
     mainImage.value = images[0]; 
 
     fetchRelatedProducts();
-
   } catch (error) {
     console.error(error);
     router.replace('/shop'); 
@@ -81,11 +63,8 @@ const fetchRelatedProducts = async () => {
   try {
     const res = await fetch(`http://localhost:8080/api/home?page=1&limit=5`);
     const result = await res.json();
-    
     if (result.data) {
-        relatedProducts.value = result.data
-            .filter(p => p.id != product.value.id)
-            .slice(0, 4);
+        relatedProducts.value = result.data.filter(p => p.id != product.value.id).slice(0, 4);
     }
   } catch (error) {
     console.error("Lỗi tải sản phẩm liên quan:", error);
@@ -93,10 +72,7 @@ const fetchRelatedProducts = async () => {
 };
 
 // --- EVENTS ---
-
-const setMainImage = (img) => {
-  mainImage.value = img;
-};
+const setMainImage = (img) => mainImage.value = img;
 
 const updateQuantity = (change) => {
   const newVal = quantity.value + change;
@@ -118,7 +94,6 @@ onMounted(() => {
 <template>
   <div class="product-detail-page bg-white min-h-screen pb-20 font-sans text-gray-800">
     
-    <!-- Loading State -->
     <div v-if="isLoading || !product" class="h-screen flex items-center justify-center">
       <div class="text-center">
         <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-black mx-auto"></div>
@@ -126,10 +101,8 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Main Content -->
     <div v-else class="container mx-auto px-6 py-10 animate-fade-in">
       
-      <!-- BREADCRUMB -->
       <nav class="text-xs text-gray-500 uppercase tracking-widest mb-10">
         <router-link to="/" class="hover:text-black">Trang chủ</router-link> 
         <span class="mx-2">/</span>
@@ -138,42 +111,25 @@ onMounted(() => {
         <span class="text-black font-bold">{{ product.name }}</span>
       </nav>
 
-      <!-- === MAIN SECTION: ẢNH & THÔNG TIN === -->
       <div class="flex flex-col lg:flex-row gap-12 mb-20">
         
-        <!-- 1. LEFT: GALLERY (ẢNH) -->
         <div class="w-full lg:w-1/2">
-          <!-- Ảnh Lớn -->
           <div class="aspect-[4/5] bg-gray-100 mb-4 relative overflow-hidden group cursor-zoom-in border border-gray-100">
-             <img 
-               :src="mainImage" 
-               class="w-full h-full object-cover object-center transition duration-500 group-hover:scale-105"
-               alt="Main Product Image"
-               @error="$event.target.src='https://via.placeholder.com/500x500?text=Image+Error'"
-             >
+             <img :src="mainImage" class="w-full h-full object-cover object-center transition duration-500 group-hover:scale-105" alt="Main Product Image" @error="$event.target.src='https://via.placeholder.com/500x500?text=Image+Error'">
              <span v-if="product.status === 1" class="absolute top-4 left-4 bg-black text-white text-xs font-bold px-3 py-1 uppercase tracking-wider">New Arrival</span>
           </div>
 
-          <!-- Thumbnails -->
           <div class="grid grid-cols-4 gap-4" v-if="galleryImages.length > 1">
-            <div 
-              v-for="(img, idx) in galleryImages" 
-              :key="idx"
-              @click="setMainImage(img)"
-              class="aspect-square bg-gray-50 cursor-pointer border transition hover:opacity-100 overflow-hidden"
-              :class="mainImage === img ? 'border-black opacity-100 ring-1 ring-black' : 'border-transparent opacity-60'"
-            >
+            <div v-for="(img, idx) in galleryImages" :key="idx" @click="setMainImage(img)" 
+                 class="aspect-square bg-gray-50 cursor-pointer border transition hover:opacity-100 overflow-hidden"
+                 :class="mainImage === img ? 'border-black opacity-100 ring-1 ring-black' : 'border-transparent opacity-60'">
               <img :src="img" class="w-full h-full object-cover" @error="$event.target.src='https://via.placeholder.com/150?text=Err'">
             </div>
           </div>
         </div>
 
-        <!-- 2. RIGHT: THÔNG TIN -->
         <div class="w-full lg:w-1/2 flex flex-col">
-          
-          <h1 class="text-3xl md:text-4xl font-black text-black uppercase tracking-tighter mb-4 leading-tight">
-            {{ product.name }}
-          </h1>
+          <h1 class="text-3xl md:text-4xl font-black text-black uppercase tracking-tighter mb-4 leading-tight">{{ product.name }}</h1>
           
           <div class="flex items-center gap-4 mb-6">
             <span class="text-2xl font-bold text-black">{{ formatCurrency(product.price) }}</span>
@@ -187,12 +143,7 @@ onMounted(() => {
             <span class="text-gray-500">(4.8/5 từ 128 đánh giá)</span>
           </div>
 
-          <!-- [FIX 2] Mô tả ngắn: Dùng v-html để render thẻ HTML -->
-          <!-- Dùng line-clamp-3 để cắt bớt nếu quá dài -->
-          <div 
-            class="text-gray-600 leading-relaxed mb-8 border-b border-gray-100 pb-8 line-clamp-3 prose prose-sm max-w-none"
-            v-html="product.description"
-          ></div>
+          <div class="text-gray-600 leading-relaxed mb-8 border-b border-gray-100 pb-8 line-clamp-3 prose prose-sm max-w-none" v-html="product.description"></div>
 
           <div class="flex flex-col sm:flex-row gap-4 mb-8">
             <div class="flex items-center border border-gray-300 w-32 h-12">
@@ -222,76 +173,38 @@ onMounted(() => {
              <a href="#" class="text-gray-400 hover:text-black"><i class="fa-brands fa-twitter"></i></a>
              <a href="#" class="text-gray-400 hover:text-black"><i class="fa-brands fa-pinterest"></i></a>
           </div>
-
         </div>
       </div>
 
-      <!-- === BOTTOM SECTION: TABS === -->
       <div class="mb-20">
         <div class="flex justify-center border-b border-gray-200 mb-8 gap-4 sm:gap-8 overflow-x-auto">
-          <button 
-            @click="activeTab = 'description'"
-            class="pb-4 px-4 text-sm font-bold uppercase tracking-widest border-b-2 transition whitespace-nowrap"
-            :class="activeTab === 'description' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'"
-          >
-            Mô tả chi tiết
-          </button>
-          <button 
-            @click="activeTab = 'reviews'"
-            class="pb-4 px-4 text-sm font-bold uppercase tracking-widest border-b-2 transition whitespace-nowrap"
-            :class="activeTab === 'reviews' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'"
-          >
-            Đánh giá (128)
-          </button>
-          <button 
-            @click="activeTab = 'comments'"
-            class="pb-4 px-4 text-sm font-bold uppercase tracking-widest border-b-2 transition whitespace-nowrap"
-            :class="activeTab === 'comments' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'"
-          >
-            Bình luận (45)
-          </button>
+          <button @click="activeTab = 'description'" class="pb-4 px-4 text-sm font-bold uppercase tracking-widest border-b-2 transition whitespace-nowrap" :class="activeTab === 'description' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'">Mô tả chi tiết</button>
+          <button @click="activeTab = 'reviews'" class="pb-4 px-4 text-sm font-bold uppercase tracking-widest border-b-2 transition whitespace-nowrap" :class="activeTab === 'reviews' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'">Đánh giá (128)</button>
+          <button @click="activeTab = 'comments'" class="pb-4 px-4 text-sm font-bold uppercase tracking-widest border-b-2 transition whitespace-nowrap" :class="activeTab === 'comments' ? 'border-black text-black' : 'border-transparent text-gray-400 hover:text-black'">Bình luận (45)</button>
         </div>
 
         <div class="max-w-4xl mx-auto">
-          
-          <!-- Tab 1: Mô tả -->
           <div v-if="activeTab === 'description'">
             <div class="relative overflow-hidden transition-all duration-500" :class="isExpanded ? 'max-h-full' : 'max-h-[500px]'">
-              
-              <!-- [FIX 2] MÔ TẢ CHI TIẾT DÙNG V-HTML -->
-              <!-- Thêm class prose để format các thẻ h1, p, ul, img bên trong HTML đẹp hơn -->
-              <div 
-                class="prose prose-sm max-w-none text-gray-600 leading-7 [&>img]:w-full [&>img]:rounded-lg [&>img]:my-4"
-                v-html="product.description"
-              ></div>
-              
+              <div class="prose prose-sm max-w-none text-gray-600 leading-7 [&>img]:w-full [&>img]:rounded-lg [&>img]:my-4" v-html="product.description"></div>
               <div v-if="!isExpanded" class="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-white to-transparent"></div>
             </div>
-
             <div class="text-center mt-6">
-              <button 
-                @click="isExpanded = !isExpanded" 
-                class="border border-black px-8 py-2 text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition"
-              >
+              <button @click="isExpanded = !isExpanded" class="border border-black px-8 py-2 text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition">
                 {{ isExpanded ? 'Thu gọn' : 'Xem chi tiết' }}
               </button>
             </div>
           </div>
 
-          <!-- Tab 2 & 3 giữ nguyên -->
           <div v-else-if="activeTab === 'reviews'" class="space-y-8 animate-fade-in">
-             <div class="bg-gray-50 p-4 text-center rounded text-sm text-gray-500 italic">
-               * Tính năng đánh giá đang được phát triển. Dưới đây là dữ liệu mẫu.
-             </div>
+             <div class="bg-gray-50 p-4 text-center rounded text-sm text-gray-500 italic">* Tính năng đánh giá đang được phát triển. Dưới đây là dữ liệu mẫu.</div>
              <div class="border-b border-gray-100 pb-8">
                <div class="flex justify-between items-start mb-3">
                  <div class="flex items-center gap-3">
                    <div class="w-10 h-10 bg-black text-white rounded-full flex items-center justify-center font-bold text-sm">A</div>
                    <div>
                      <p class="font-bold text-sm text-black">Trần Văn A</p>
-                     <div class="flex text-black text-[10px] mt-1">
-                       <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-                     </div>
+                     <div class="flex text-black text-[10px] mt-1"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></div>
                    </div>
                  </div>
                  <span class="text-xs text-gray-400">2 ngày trước</span>
@@ -309,11 +222,9 @@ onMounted(() => {
                 </div>
              </div>
           </div>
-
         </div>
       </div>
 
-      <!-- === SẢN PHẨM LIÊN QUAN === -->
       <div v-if="relatedProducts.length > 0">
         <div class="flex justify-between items-end mb-8 border-b border-gray-100 pb-4">
           <h2 class="text-2xl font-bold uppercase tracking-tighter">Có thể bạn thích</h2>
@@ -321,29 +232,16 @@ onMounted(() => {
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
-          <div 
-            v-for="relProd in relatedProducts" 
-            :key="relProd.id"
-            class="group cursor-pointer"
-            @click="router.push(`/productDetail/${relProd.id}`)"
-          >
-            <!-- [FIX 1] Áp dụng getFullImageUrl cho ảnh thumbnail related -->
+          <div v-for="relProd in relatedProducts" :key="relProd.id" class="group cursor-pointer" @click="router.push(`/productDetail/${relProd.id}`)">
             <div class="relative overflow-hidden aspect-[3/4] bg-gray-100 mb-3">
-              <img 
-                :src="getFullImageUrl(relProd.image ? relProd.image.split(',')[0] : '')" 
-                class="w-full h-full object-cover transition duration-500 group-hover:scale-105"
-                @error="$event.target.src='https://via.placeholder.com/300x400?text=Err'"
-              >
+              <img :src="getFullImageUrl(relProd.image ? relProd.image.split(',')[0] : '')" 
+                   class="w-full h-full object-cover transition duration-500 group-hover:scale-105"
+                   @error="$event.target.src='https://via.placeholder.com/300x400?text=Err'">
               <div class="absolute inset-x-0 bottom-0 p-2 translate-y-full group-hover:translate-y-0 transition duration-300 flex justify-center gap-2 pb-4">
-                 <button class="bg-white text-black w-8 h-8 rounded-full flex items-center justify-center hover:bg-black hover:text-white shadow-md text-xs">
-                   <i class="fa-solid fa-cart-plus"></i>
-                 </button>
-                 <button class="bg-white text-black w-8 h-8 rounded-full flex items-center justify-center hover:bg-black hover:text-white shadow-md text-xs">
-                   <i class="fa-regular fa-eye"></i>
-                 </button>
+                 <button class="bg-white text-black w-8 h-8 rounded-full flex items-center justify-center hover:bg-black hover:text-white shadow-md text-xs"><i class="fa-solid fa-cart-plus"></i></button>
+                 <button class="bg-white text-black w-8 h-8 rounded-full flex items-center justify-center hover:bg-black hover:text-white shadow-md text-xs"><i class="fa-regular fa-eye"></i></button>
               </div>
             </div>
-            
             <h3 class="text-sm font-bold group-hover:underline truncate text-gray-900">{{ relProd.name }}</h3>
             <p class="text-gray-500 text-xs font-bold mt-1">{{ formatCurrency(relProd.price) }}</p>
           </div>
@@ -355,9 +253,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.animate-fade-in {
-  animation: fadeIn 0.5s ease-out forwards;
-}
+.animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
