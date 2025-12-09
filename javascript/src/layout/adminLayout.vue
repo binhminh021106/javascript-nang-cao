@@ -17,7 +17,7 @@
 
         <p class="px-6 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Quản lý</p>
 
-        <router-link :to="{ name: 'AdminProducts'}"
+        <router-link :to="{ name: 'AdminProducts' }"
           class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:text-black transition-colors relative group"
           active-class="bg-gray-100 !text-black border-r-4 border-black">
           <i
@@ -25,7 +25,7 @@
           Sản phẩm
         </router-link>
 
-        <router-link :to="{ name: 'AdminCategories'}"
+        <router-link :to="{ name: 'AdminCategories' }"
           class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:text-black transition-colors relative group"
           active-class="bg-gray-100 !text-black border-r-4 border-black">
           <i
@@ -33,10 +33,13 @@
           Danh mục
         </router-link>
 
-        <router-link :to="{ name: 'AdminUsers'}"
-          class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-black transition-colors group">
-          <i class="fa-solid fa-users w-6 text-center mr-2 text-gray-400 group-hover:text-black transition-colors"></i>
-          Khách hàng
+        <!-- MỚI: QUẢN LÝ ĐƠN HÀNG -->
+        <router-link :to="{ name: 'AdminOrders' }"
+          class="flex items-center px-6 py-3 text-sm font-medium text-gray-700 hover:text-black transition-colors relative group"
+          active-class="bg-gray-100 !text-black border-r-4 border-black">
+          <i
+            class="fa-solid fa-file-invoice-dollar w-6 text-center mr-2 text-gray-400 group-hover:text-black group-[.router-link-active]:text-black transition-colors"></i>
+          Đơn hàng
         </router-link>
 
         <a href="#"
@@ -133,15 +136,34 @@
           <span class="text-xl font-bold">Menu</span>
         </div>
 
-        <!-- Mobile Nav Links (Copy logic from desktop) -->
+        <!-- Mobile Nav Links -->
         <nav class="flex-1 py-6 px-4 space-y-2">
-          <router-link to="/admin/products" @click="isSidebarOpen = false"
-            class="flex items-center px-4 py-3 rounded-lg bg-gray-100 text-black font-medium">
+
+          <router-link :to="{ name: 'AdminProducts' }" @click="isSidebarOpen = false"
+            class="flex items-center px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-black font-medium"
+            active-class="bg-gray-100 !text-black">
             <i class="fa-solid fa-box-open w-6 mr-2"></i> Sản phẩm
           </router-link>
-          <a href="#" class="flex items-center px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-50">
+
+          <router-link :to="{ name: 'AdminCategories' }" @click="isSidebarOpen = false"
+            class="flex items-center px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-black font-medium"
+            active-class="bg-gray-100 !text-black">
+            <i class="fa-solid fa-layer-group w-6 mr-2"></i> Danh mục
+          </router-link>
+
+          <!-- MOBILE ORDER LINK -->
+          <router-link :to="{ name: 'AdminOrders' }" @click="isSidebarOpen = false"
+            class="flex items-center px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-black font-medium"
+            active-class="bg-gray-100 !text-black">
+            <i class="fa-solid fa-file-invoice-dollar w-6 mr-2"></i> Đơn hàng
+          </router-link>
+
+          <router-link :to="{ name: 'AdminUsers' }" @click="isSidebarOpen = false"
+            class="flex items-center px-4 py-3 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-black font-medium"
+            active-class="bg-gray-100 !text-black">
             <i class="fa-solid fa-users w-6 mr-2"></i> Khách hàng
-          </a>
+          </router-link>
+
         </nav>
       </div>
     </div>
