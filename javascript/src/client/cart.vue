@@ -1,78 +1,103 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import Swal from 'sweetalert2';
 
 const router = useRouter();
+const cartItems = ref([]); // Dữ liệu thật từ API
+const isLoading = ref(false);
 
-// --- STATE (Mock Data - Giả lập dữ liệu trong giỏ) ---
-// Trong thực tế, bạn sẽ lấy dữ liệu này từ Pinia Store hoặc LocalStorage
-const cartItems = ref([
-  {
-    id: 1,
-    name: 'ÁO THUN REGULAR FIT',
-    category: 'Thời trang nam',
-    price: 350000,
-    quantity: 2,
-    image: 'https://placehold.co/300x300/f3f4f6/000000?text=Ao+Thun'
-  },
-  {
-    id: 2,
-    name: 'QUẦN TÂY ỐNG ĐỨNG',
-    category: 'Quần nam',
-    price: 550000,
-    quantity: 1,
-    image: 'https://placehold.co/300x300/f3f4f6/000000?text=Quan+Tay'
-  },
-  {
-    id: 3,
-    name: 'TÚI TOTE CANVAS',
-    category: 'Phụ kiện',
-    price: 120000,
-    quantity: 1,
-    image: 'https://placehold.co/300x300/f3f4f6/000000?text=Tui+Tote'
-  }
-]);
-
-const promoCode = ref('');
+// Lấy thông tin user
+const userStr = localStorage.getItem('user_info') || localStorage.getItem('user');
+const user = userStr ? JSON.parse(userStr) : null;
 
 // --- COMPUTED ---
-
-// Tính tổng tiền tạm tính
 const subtotal = computed(() => {
-  return cartItems.value.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  return cartItems.value.reduce((sum, item) => sum + (item.price * item.cart_quantity), 0);
 });
 
-// Phí vận chuyển (Miễn phí nếu đơn > 1 triệu)
 const shippingFee = computed(() => {
+  if (subtotal.value === 0) return 0;
   if (subtotal.value > 1000000) return 0;
   return 30000;
 });
 
-// Tổng cộng
 const total = computed(() => {
   return subtotal.value + shippingFee.value;
 });
 
 // --- METHODS ---
 
-const increaseQty = (id) => {
-  const item = cartItems.value.find(i => i.id === id);
-  if (item) item.quantity++;
+const getImageUrl = (imgStr) => {
+    if (!imgStr) return 'https://placehold.co/300x300?text=No+Image';
+    if (imgStr.startsWith('http')) return imgStr;
+    return `http://localhost:8080/uploads/${imgStr}`;
 };
 
-const decreaseQty = (id) => {
-  const item = cartItems.value.find(i => i.id === id);
-  if (item && item.quantity > 1) {
-    item.quantity--;
-  } else {
-    // Nếu giảm về 0 thì hỏi xóa
-    removeItem(id);
-  }
+// 1. Lấy dữ liệu giỏ hàng
+const fetchCart = async () => {
+    if (!user) {
+        router.push('/login');
+        return;
+    }
+    isLoading.value = true;
+    try {
+        const res = await fetch(`http://localhost:8080/api/cart/${user.id}`);
+        if(res.ok) {
+            cartItems.value = await res.json();
+        }
+    } catch (e) {
+        console.error(e);
+    } finally {
+        isLoading.value = false;
+    }
 };
 
-const removeItem = (id) => {
-  if (confirm('Bạn có chắc muốn xóa sản phẩm này khỏi giỏ hàng?')) {
-    cartItems.value = cartItems.value.filter(i => i.id !== id);
+// 2. Cập nhật số lượng
+const updateQuantity = async (item, change) => {
+    const newQty = item.cart_quantity + change;
+    if (newQty < 1) {
+        removeItem(item.cart_id);
+        return;
+    }
+
+    // Cập nhật giao diện ngay cho mượt
+    item.cart_quantity = newQty;
+
+    // Gọi API cập nhật
+    try {
+        await fetch(`http://localhost:8080/api/cart/${item.cart_id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quantity: newQty })
+        });
+    } catch (e) {
+        console.error("Lỗi cập nhật");
+    }
+};
+
+// 3. Xóa sản phẩm
+const removeItem = async (cartId) => {
+  const result = await Swal.fire({
+      title: 'Xóa sản phẩm?',
+      text: "Bạn có chắc muốn xóa sản phẩm này khỏi giỏ?",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#000',
+      cancelButtonColor: '#d33',
+      confirmButtonText: 'Xóa',
+      cancelButtonText: 'Hủy'
+  });
+
+  if (result.isConfirmed) {
+    try {
+        await fetch(`http://localhost:8080/api/cart/${cartId}`, { method: 'DELETE' });
+        // Xóa khỏi danh sách local
+        cartItems.value = cartItems.value.filter(i => i.cart_id !== cartId);
+        Swal.fire('Đã xóa!', '', 'success');
+    } catch (e) {
+        Swal.fire('Lỗi', 'Không thể xóa', 'error');
+    }
   }
 };
 
@@ -81,9 +106,13 @@ const formatCurrency = (amount) => {
 };
 
 const handleCheckout = () => {
-  alert('Chức năng thanh toán đang được phát triển!');
-  // router.push('/checkout');
+  if(cartItems.value.length === 0) return Swal.fire('Giỏ hàng trống', 'Vui lòng thêm sản phẩm', 'info');
+  Swal.fire('Thông báo', 'Chức năng thanh toán đang được phát triển!', 'info');
 };
+
+onMounted(() => {
+    fetchCart();
+});
 </script>
 
 <template>
@@ -101,8 +130,13 @@ const handleCheckout = () => {
 
     <div class="container mx-auto px-6">
       
+      <!-- LOADING -->
+      <div v-if="isLoading" class="text-center py-20">
+          <div class="animate-spin rounded-full h-10 w-10 border-t-2 border-black mx-auto"></div>
+      </div>
+
       <!-- TRƯỜNG HỢP GIỎ HÀNG TRỐNG -->
-      <div v-if="cartItems.length === 0" class="text-center py-20">
+      <div v-else-if="cartItems.length === 0" class="text-center py-20">
         <div class="mb-6">
           <i class="fa-solid fa-bag-shopping text-6xl text-gray-200"></i>
         </div>
@@ -134,17 +168,17 @@ const handleCheckout = () => {
           <div class="space-y-6 md:space-y-0">
             <div 
               v-for="item in cartItems" 
-              :key="item.id" 
+              :key="item.cart_id" 
               class="flex flex-col md:grid md:grid-cols-12 gap-4 items-center border-b border-gray-100 pb-6 md:py-6 last:border-0"
             >
               
               <!-- Cột 1: Info -->
               <div class="col-span-6 flex items-center gap-4 w-full">
                 <div class="w-20 h-24 bg-gray-100 flex-shrink-0 relative group">
-                  <img :src="item.image" class="w-full h-full object-cover">
-                  <!-- Nút xóa (Hover mới hiện trên desktop) -->
+                  <img :src="getImageUrl(item.image)" class="w-full h-full object-cover">
+                  <!-- Nút xóa -->
                   <button 
-                    @click="removeItem(item.id)"
+                    @click="removeItem(item.cart_id)"
                     class="absolute top-0 left-0 bg-black text-white w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition hover:bg-red-600"
                     title="Xóa"
                   >
@@ -152,15 +186,15 @@ const handleCheckout = () => {
                   </button>
                 </div>
                 <div>
-                  <p class="text-xs text-gray-400 uppercase mb-1">{{ item.category }}</p>
+                  <p class="text-xs text-gray-400 uppercase mb-1">{{ item.category_name || 'Khác' }}</p>
                   <h3 
-                    @click="router.push(`/product/${item.id}`)"
+                    @click="router.push(`/product/${item.product_id}`)"
                     class="font-bold text-sm text-black hover:underline cursor-pointer"
                   >
                     {{ item.name }}
                   </h3>
                   <!-- Mobile Remove Button -->
-                  <button @click="removeItem(item.id)" class="md:hidden text-xs text-red-500 mt-2 underline">Xóa</button>
+                  <button @click="removeItem(item.cart_id)" class="md:hidden text-xs text-red-500 mt-2 underline">Xóa</button>
                 </div>
               </div>
 
@@ -173,16 +207,16 @@ const handleCheckout = () => {
               <!-- Cột 3: Quantity -->
               <div class="col-span-2 flex justify-center w-full md:w-auto">
                 <div class="flex items-center border border-gray-300 h-8">
-                  <button @click="decreaseQty(item.id)" class="w-8 h-full flex items-center justify-center hover:bg-gray-100 text-gray-600 transition text-xs">-</button>
-                  <input type="text" :value="item.quantity" readonly class="w-10 h-full text-center outline-none bg-transparent font-bold text-xs text-black">
-                  <button @click="increaseQty(item.id)" class="w-8 h-full flex items-center justify-center hover:bg-gray-100 text-gray-600 transition text-xs">+</button>
+                  <button @click="updateQuantity(item, -1)" class="w-8 h-full flex items-center justify-center hover:bg-gray-100 text-gray-600 transition text-xs">-</button>
+                  <input type="text" :value="item.cart_quantity" readonly class="w-10 h-full text-center outline-none bg-transparent font-bold text-xs text-black">
+                  <button @click="updateQuantity(item, 1)" class="w-8 h-full flex items-center justify-center hover:bg-gray-100 text-gray-600 transition text-xs">+</button>
                 </div>
               </div>
 
               <!-- Cột 4: Total Line -->
               <div class="col-span-2 text-right w-full flex justify-between md:block md:w-auto">
                 <span class="md:hidden text-sm text-gray-500">Thành tiền:</span>
-                <span class="font-bold text-sm text-black">{{ formatCurrency(item.price * item.quantity) }}</span>
+                <span class="font-bold text-sm text-black">{{ formatCurrency(item.price * item.cart_quantity) }}</span>
               </div>
 
             </div>
@@ -212,25 +246,6 @@ const handleCheckout = () => {
                 <span v-if="shippingFee === 0" class="text-green-600 font-bold text-xs uppercase">Miễn phí</span>
                 <span v-else class="font-bold">{{ formatCurrency(shippingFee) }}</span>
               </div>
-              <div class="flex justify-between text-sm items-center">
-                <span class="text-gray-600">Mã giảm giá</span>
-                <span class="text-gray-400 italic text-xs">Chưa áp dụng</span>
-              </div>
-            </div>
-
-            <!-- Promo Code Input -->
-            <div class="mb-6">
-              <div class="flex">
-                <input 
-                  v-model="promoCode"
-                  type="text" 
-                  placeholder="Mã ưu đãi" 
-                  class="w-full border border-gray-300 border-r-0 px-4 py-2 text-xs outline-none focus:border-black uppercase placeholder-normal"
-                >
-                <button class="bg-black text-white px-4 py-2 text-xs font-bold uppercase hover:bg-gray-800 transition">
-                  Áp dụng
-                </button>
-              </div>
             </div>
 
             <div class="border-t border-black pt-4 mb-8">
@@ -247,15 +262,6 @@ const handleCheckout = () => {
             >
               Tiến hành thanh toán
             </button>
-
-            <div class="mt-6 text-center space-y-2">
-              <p class="text-[10px] text-gray-400 uppercase tracking-wider">Chúng tôi chấp nhận</p>
-              <div class="flex justify-center gap-3 text-2xl text-gray-400">
-                <i class="fa-brands fa-cc-visa hover:text-black transition"></i>
-                <i class="fa-brands fa-cc-mastercard hover:text-black transition"></i>
-                <i class="fa-brands fa-cc-paypal hover:text-black transition"></i>
-              </div>
-            </div>
 
           </div>
         </div>
