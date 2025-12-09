@@ -6,6 +6,8 @@ const cors = require("cors");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+// 1. Thêm thư viện bcrypt
+const bcrypt = require("bcrypt");
 
 const app = express();
 const server = http.createServer(app);
@@ -118,12 +120,21 @@ app.get("/api/products/:id", async (req, res) => {
 // Thêm sản phẩm
 app.post("/api/products", upload.array("images", 5), async (req, res) => {
   try {
-    const { name, price, description, status, category_id } = req.body;
+    const { name, price, description, status, category_id, quantity } =
+      req.body;
     const images = req.files.map((f) => f.filename).join(","); // Lấy tên file từ multer
 
     await db(
-      "INSERT INTO sanpham (name, price, description, image, status, category_id) VALUES (?, ?, ?, ?, ?, ?)",
-      [name, price, description || "", images, status || 1, category_id || null]
+      "INSERT INTO sanpham (name, price, description, image, status, category_id, quantity) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [
+        name,
+        price,
+        description || "",
+        images,
+        status || 1,
+        category_id || null,
+        quantity || null,
+      ]
     );
 
     io.emit("REFRESH_DATA");
@@ -137,8 +148,16 @@ app.post("/api/products", upload.array("images", 5), async (req, res) => {
 app.put("/api/products/:id", upload.array("images", 5), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, price, description, status, category_id, keepOldImages } =
-      req.body;
+    // 1. Thêm quantity vào destructuring
+    const {
+      name,
+      price,
+      description,
+      status,
+      category_id,
+      keepOldImages,
+      quantity,
+    } = req.body;
 
     const [oldData] = await db("SELECT image FROM sanpham WHERE id=?", [id]);
     if (!oldData) return res.status(404).json({ error: "Not found" });
@@ -153,8 +172,9 @@ app.put("/api/products/:id", upload.array("images", 5), async (req, res) => {
         ? (oldImgs.forEach(deleteImg), newImgs)
         : oldImgs;
 
+    // 2. Cập nhật câu SQL và mảng tham số (params)
     await db(
-      "UPDATE sanpham SET name=?, price=?, description=?, image=?, status=?, category_id=? WHERE id=?",
+      "UPDATE sanpham SET name=?, price=?, description=?, image=?, status=?, category_id=?, quantity=? WHERE id=?",
       [
         name,
         price,
@@ -162,6 +182,7 @@ app.put("/api/products/:id", upload.array("images", 5), async (req, res) => {
         finalImgs.join(","),
         status,
         category_id || null,
+        quantity || 0, // Thêm giá trị quantity vào đây
         id,
       ]
     );
@@ -242,6 +263,155 @@ app.delete("/api/categories/:id", async (req, res) => {
   await db("DELETE FROM categories WHERE id=?", [req.params.id]);
   // io.emit("REFRESH_CATEGORIES");
   res.json({ message: "Đã xóa" });
+});
+
+// Đăng nhập đăng kí user
+
+app.post("/api/register", async (req, res) => {
+  try {
+    const { name, email, password, phone } = req.body;
+
+    // 1. Kiểm tra xem email đã tồn tại chưa
+    const [existingUser] = await db("SELECT * FROM users WHERE email = ?", [
+      email,
+    ]);
+    if (existingUser) {
+      return res.status(400).json({ error: "Email này đã được sử dụng!" });
+    }
+
+    // 2. MÃ HÓA MẬT KHẨU
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // 3. Thêm user mới với mật khẩu đã mã hóa
+    await db(
+      "INSERT INTO users (name, email, password, phone, role, status, created_at) VALUES (?, ?, ?, ?, 'user', 'active', NOW())",
+      [name, email, hashedPassword, phone || ""]
+    );
+
+    res.status(201).json({ message: "Đăng ký thành công!" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// API Đăng nhập
+app.post("/api/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // 1. Tìm user theo email
+    const [user] = await db("SELECT * FROM users WHERE email = ?", [email]);
+
+    // 2. Nếu không có user thì báo lỗi luôn
+    if (!user) {
+      return res.status(400).json({ error: "Sai email hoặc mật khẩu!" });
+    }
+
+    // 3. SO SÁNH MẬT KHẨU (Dùng bcrypt.compare)
+    const isMatch = await bcrypt.compare(password, user.password);
+
+    if (!isMatch) {
+      return res.status(400).json({ error: "Sai email hoặc mật khẩu!" });
+    }
+
+    // 4. Nếu đúng, trả về thông tin user (trừ mật khẩu ra cho an toàn)
+    const { password: pass, ...userInfo } = user;
+    res.json({ message: "Đăng nhập thành công", user: userInfo });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Giỏ hàng
+
+app.post("/api/cart", async (req, res) => {
+  try {
+    const { user_id, product_id, quantity } = req.body;
+
+    // Kiểm tra xem sản phẩm đã có trong giỏ của user này chưa
+    const [existingItem] = await db(
+      "SELECT * FROM carts WHERE user_id = ? AND product_id = ?",
+      [user_id, product_id]
+    );
+
+    if (existingItem) {
+      // Nếu có rồi thì cộng dồn số lượng
+      const newQuantity = existingItem.quantity + Number(quantity);
+      await db("UPDATE carts SET quantity = ? WHERE id = ?", [
+        newQuantity,
+        existingItem.id,
+      ]);
+    } else {
+      // Nếu chưa có thì thêm mới
+      await db(
+        "INSERT INTO carts (user_id, product_id, quantity) VALUES (?, ?, ?)",
+        [user_id, product_id, quantity]
+      );
+    }
+    res.json({ message: "Đã thêm vào giỏ hàng" });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Lỗi thêm vào giỏ hàng" });
+  }
+});
+
+// 2. Lấy danh sách giỏ hàng của user
+app.get("/api/cart/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    // Join bảng carts với bảng sanpham để lấy tên, giá, ảnh
+    const sql = `
+      SELECT c.id as cart_id, c.quantity as cart_quantity, 
+             p.id as product_id, p.name, p.price, p.image, 
+             cate.name as category_name
+      FROM carts c
+      JOIN sanpham p ON c.product_id = p.id
+      LEFT JOIN categories cate ON p.category_id = cate.id
+      WHERE c.user_id = ?
+    `;
+    const rows = await db(sql, [userId]);
+
+    // Format lại ảnh
+    const data = rows.map((item) => ({
+      ...item,
+      image: item.image ? item.image.split(",")[0] : "", // Lấy ảnh đầu tiên
+      image_full: item.image ? item.image.split(",").map(formatImg)[0] : "", // Link ảnh full
+    }));
+
+    res.json(data);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Lỗi lấy giỏ hàng" });
+  }
+});
+
+// 3. Cập nhật số lượng trong giỏ (Tăng/Giảm ở trang Cart)
+app.put("/api/cart/:id", async (req, res) => {
+  try {
+    const { quantity } = req.body; // Số lượng mới
+    if (quantity <= 0) {
+      await db("DELETE FROM carts WHERE id = ?", [req.params.id]);
+    } else {
+      await db("UPDATE carts SET quantity = ? WHERE id = ?", [
+        quantity,
+        req.params.id,
+      ]);
+    }
+    res.json({ message: "Đã cập nhật giỏ hàng" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 4. Xóa sản phẩm khỏi giỏ
+app.delete("/api/cart/:id", async (req, res) => {
+  try {
+    await db("DELETE FROM carts WHERE id = ?", [req.params.id]);
+    res.json({ message: "Đã xóa khỏi giỏ hàng" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 server.listen(port, () =>

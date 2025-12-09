@@ -13,15 +13,15 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "http://172.16.30.203:8080",
-        // target: "http://192.168.1.13:8080",
+        // target: "http://172.16.29.200:8080",
+        target: "http://192.168.1.13:8080",
         changeOrigin: true,
         secure: false,
       },
       // Proxy hình ảnh
       "/uploads": {
-        target: "http://172.16.30.203:8080",
-        // target: "http://192.168.1.13:8080",
+        // target: "http://172.16.29.200:8080",
+        target: "http://192.168.1.13:8080",
         changeOrigin: true,
         secure: false,
       },

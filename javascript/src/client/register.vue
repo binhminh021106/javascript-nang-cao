@@ -1,6 +1,8 @@
 <script setup>
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
+// Import SweetAlert2
+import Swal from 'sweetalert2';
 
 const router = useRouter();
 
@@ -18,6 +20,27 @@ const isLoading = ref(false);
 const errorMsg = ref('');
 
 // --- METHODS ---
+// Hàm cấu hình chung cho Swal để đồng bộ style Monochrome
+const showSwal = (icon, title, text) => {
+  return Swal.fire({
+    icon: icon,
+    title: title,
+    text: text,
+    // Tùy chỉnh màu sắc cho hợp theme đen trắng
+    iconColor: icon === 'success' ? '#000000' : '#d33', // Thành công màu đen, lỗi giữ đỏ hoặc đen tùy bạn
+    confirmButtonColor: '#000000', // Nút xác nhận màu đen
+    confirmButtonText: 'ĐỒNG Ý',
+    background: '#ffffff',
+    color: '#000000',
+    // Thêm class để chỉnh font và bỏ bo tròn nếu muốn
+    customClass: {
+      popup: 'font-inter', // Dùng font của web
+      confirmButton: 'font-bold uppercase tracking-widest px-6 py-3' // Style giống nút Login
+    },
+    buttonsStyling: true
+  });
+};
+
 const handleRegister = async () => {
   isLoading.value = true;
   errorMsg.value = '';
@@ -38,25 +61,56 @@ const handleRegister = async () => {
 
   // 3. Kiểm tra điều khoản
   if (!formData.value.agree) {
-    errorMsg.value = 'Bạn phải đồng ý với điều khoản dịch vụ!';
+    // Dùng Swal cho cảnh báo này luôn cho đẹp
+    showSwal('warning', 'CHÚ Ý', 'Bạn phải đồng ý với điều khoản dịch vụ!');
     isLoading.value = false;
     return;
   }
 
-  // Giả lập gọi API đăng ký (Delay 1.5s)
-  setTimeout(() => {
-    // Thành công -> Chuyển hướng về đăng nhập
-    alert('Đăng ký thành công! Vui lòng đăng nhập.');
+  try {
+    // 4. GỌI API THỰC TẾ
+    const res = await fetch('http://localhost:8080/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        // Map dữ liệu từ form sang tên cột trong DB
+        name: formData.value.fullName, 
+        email: formData.value.email,
+        phone: formData.value.phone,
+        password: formData.value.password
+      })
+    });
+
+    const data = await res.json();
+
+    // Nếu server trả về lỗi (ví dụ: Email đã tồn tại)
+    if (!res.ok) {
+      throw new Error(data.error || 'Đăng ký thất bại');
+    }
+
+    // --- THÀNH CÔNG ---
+    // Thay alert() bằng Swal
+    await showSwal('success', 'ĐĂNG KÝ THÀNH CÔNG', 'Chào mừng bạn đến với Monochrome. Vui lòng đăng nhập để tiếp tục.');
+    
+    // Chuyển hướng sau khi user bấm OK
     router.push('/login');
+
+  } catch (err) {
+    // --- LỖI API ---
+    // Hiển thị Swal lỗi
+    showSwal('error', 'CÓ LỖI XẢY RA', err.message);
+    // Vẫn set errorMsg để hiện text đỏ nhỏ ở form nếu muốn
+    errorMsg.value = err.message;
+  } finally {
     isLoading.value = false;
-  }, 1500);
+  }
 };
 </script>
 
 <template>
   <div class="min-h-screen flex font-inter">
     
-    <!-- 1. PHẦN HÌNH ẢNH (Bên Trái - Giữ nguyên style để đồng bộ) -->
+    <!-- 1. PHẦN HÌNH ẢNH (Bên Trái) -->
     <div class="hidden lg:flex w-1/2 bg-black relative items-center justify-center overflow-hidden">
       <!-- Background Pattern -->
       <div class="absolute inset-0 opacity-20 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
@@ -77,7 +131,7 @@ const handleRegister = async () => {
       </div>
     </div>
 
-    <!-- 2. PHẦN FORM (Bên Phải - Scrollable nếu form dài) -->
+    <!-- 2. PHẦN FORM (Bên Phải) -->
     <div class="w-full lg:w-1/2 bg-white flex flex-col items-center justify-center p-8 relative overflow-y-auto">
       
       <!-- Nút về trang chủ -->

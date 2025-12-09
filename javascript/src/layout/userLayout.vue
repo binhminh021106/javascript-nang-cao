@@ -51,9 +51,62 @@
             </span>
           </router-link>
 
-          <router-link to="/login" class="relative group" title="Tài khoản">
+          <!-- === LOGIC HIỂN THỊ USER (Đã sửa style Dropdown) === -->
+          <!-- Trường hợp ĐÃ ĐĂNG NHẬP -->
+          <div v-if="currentUser" class="relative cursor-pointer" ref="userDropdownRef">
+            <!-- Nút User Trigger -->
+            <div @click="toggleUserDropdown"
+              class="flex items-center gap-2 py-2 select-none transition-opacity hover:opacity-70">
+              <i class="fa-regular fa-user text-xl text-black"></i>
+              <span class="text-sm font-bold uppercase hidden md:inline-block max-w-[100px] truncate">
+                {{ currentUser.name }}
+              </span>
+              <!-- Icon mũi tên nhỏ để biết là dropdown -->
+              <i class="fa-solid fa-chevron-down text-[10px] ml-1 transition-transform duration-300"
+                :class="{ 'rotate-180': isUserDropdownOpen }"></i>
+            </div>
+
+            <!-- Dropdown Menu (Style Monochrome: Viền đen, góc vuông) -->
+            <transition name="dropdown-fade">
+              <div v-if="isUserDropdownOpen"
+                class="absolute right-0 top-full mt-2 w-56 bg-white border border-black z-50 animate-fade-in origin-top-right">
+
+                <!-- Header của Dropdown -->
+                <div class="p-4 border-b border-black bg-gray-50">
+                  <p class="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Tài khoản</p>
+                  <p class="font-bold text-sm truncate uppercase tracking-tight">{{ currentUser.name }}</p>
+                </div>
+
+                <!-- List Items -->
+                <ul class="text-sm">
+                  <li>
+                    <router-link to="/account"
+                      class="flex items-center w-full px-4 py-3 text-left hover:bg-black hover:text-white transition-colors duration-200 border-b border-gray-100">
+                      <i class="fa-regular fa-id-card mr-3 w-4 text-center"></i> Hồ sơ cá nhân
+                    </router-link>
+                  </li>
+                  <li>
+                    <router-link to="/orders"
+                      class="flex items-center w-full px-4 py-3 text-left hover:bg-black hover:text-white transition-colors duration-200 border-b border-gray-100">
+                      <i class="fa-solid fa-box-open mr-3 w-4 text-center"></i> Đơn mua
+                    </router-link>
+                  </li>
+                  <li>
+                    <button @click="handleLogout"
+                      class="flex items-center w-full text-left px-4 py-3 text-red-600 hover:bg-red-600 hover:text-white transition-colors duration-200 font-medium uppercase text-xs tracking-wider">
+                      <i class="fa-solid fa-arrow-right-from-bracket mr-3 w-4 text-center"></i> Đăng xuất
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </transition>
+          </div>
+
+          <!-- Trường hợp CHƯA ĐĂNG NHẬP (Hiện icon cũ) -->
+          <router-link v-else to="/login" class="relative group" title="Tài khoản">
             <i class="fa-regular fa-user text-xl text-black hover:text-gray-600 transition"></i>
           </router-link>
+          <!-- === KẾT THÚC LOGIC === -->
 
           <!-- Mobile Menu Button -->
           <button @click="toggleMenu" class="md:hidden text-2xl ml-2 text-black">
@@ -66,6 +119,17 @@
       <transition name="slide-fade">
         <div v-if="isMenuOpen" class="md:hidden border-t border-gray-100 p-6 bg-white absolute w-full shadow-lg z-40">
           <nav class="flex flex-col gap-4 text-center">
+            <!-- Hiển thị user info trên mobile menu -->
+            <div v-if="currentUser" class="mb-4 pb-4 border-b border-gray-100">
+              <p class="font-bold text-lg mb-1">{{ currentUser.name }}</p>
+              <button @click="handleLogout" class="text-xs text-red-500 uppercase font-bold tracking-widest">Đăng
+                xuất</button>
+            </div>
+            <div v-else class="mb-4 pb-4 border-b border-gray-100">
+              <router-link to="/login" class="text-sm font-bold uppercase tracking-widest text-black">Đăng nhập / Đăng
+                ký</router-link>
+            </div>
+
             <router-link to="/" class="font-medium hover:bg-gray-50 py-2 text-black no-underline"
               @click="toggleMenu">Trang Chủ</router-link>
             <router-link to="/shop" class="font-medium hover:bg-gray-50 py-2 text-black no-underline"
@@ -82,7 +146,6 @@
 
     <!-- === MAIN CONTENT (Router View) === -->
     <main class="flex-grow">
-      <!-- Đây là nơi nội dung các trang con (Home, Shop, About...) sẽ hiển thị -->
       <router-view />
     </main>
 
@@ -149,13 +212,91 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
+import { useRouter } from 'vue-router';
+// Import Swal để dùng popup xác nhận đăng xuất cho đẹp (nếu bạn muốn)
+import Swal from 'sweetalert2';
 
-// State quản lý menu mobile
+const router = useRouter();
 const isMenuOpen = ref(false);
+const isUserDropdownOpen = ref(false); // State quản lý dropdown user
+const userDropdownRef = ref(null); // Ref để nhận diện click outside
+const currentUser = ref(null); // Biến chứa thông tin user
+
+// Toggle Dropdown User
+const toggleUserDropdown = () => {
+  isUserDropdownOpen.value = !isUserDropdownOpen.value;
+};
+
+// Xử lý Click Outside (Bấm ra ngoài thì đóng)
+const handleClickOutside = (event) => {
+  if (userDropdownRef.value && !userDropdownRef.value.contains(event.target)) {
+    isUserDropdownOpen.value = false;
+  }
+};
+
+// 1. Lấy thông tin user khi component được load
+onMounted(() => {
+  const userStr = localStorage.getItem('user');
+  if (userStr) {
+    try {
+      currentUser.value = JSON.parse(userStr);
+    } catch (e) {
+      console.error("Lỗi parse user data", e);
+      localStorage.removeItem('user'); // Xóa nếu dữ liệu lỗi
+    }
+  }
+
+  // Lắng nghe sự kiện click toàn trang
+  document.addEventListener('click', handleClickOutside);
+});
+
+// Gỡ lắng nghe khi component bị hủy
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside);
+});
 
 const toggleMenu = () => {
   isMenuOpen.value = !isMenuOpen.value;
+};
+
+// 2. Hàm Đăng xuất
+const handleLogout = () => {
+  // Đóng dropdown trước
+  isUserDropdownOpen.value = false;
+
+  Swal.fire({
+    title: 'ĐĂNG XUẤT?',
+    text: "Bạn có chắc chắn muốn đăng xuất không?",
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#000',
+    cancelButtonColor: '#d33',
+    confirmButtonText: 'ĐỒNG Ý',
+    cancelButtonText: 'HỦY',
+    customClass: {
+      popup: 'font-inter',
+      confirmButton: 'font-bold uppercase',
+      cancelButton: 'font-bold uppercase'
+    }
+  }).then((result) => {
+    if (result.isConfirmed) {
+      // Xóa localStorage
+      localStorage.removeItem('user');
+      currentUser.value = null;
+
+      // Chuyển về trang login
+      router.push('/login');
+
+      Swal.fire({
+        title: 'ĐÃ ĐĂNG XUẤT',
+        icon: 'success',
+        confirmButtonColor: '#000',
+        timer: 1500,
+        showConfirmButton: false
+      });
+    }
+  });
 };
 </script>
 
@@ -243,5 +384,34 @@ const toggleMenu = () => {
 .slide-fade-leave-to {
   transform: translateY(-10px);
   opacity: 0;
+}
+
+/* Animation cho dropdown user */
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Hiệu ứng Fade cho dropdown toggle */
+.dropdown-fade-enter-active,
+.dropdown-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.dropdown-fade-enter-from,
+.dropdown-fade-leave-to {
+  opacity: 0;
+  transform: translateY(5px);
 }
 </style>

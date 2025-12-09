@@ -1,9 +1,12 @@
 <script setup>
+// --- 1. IMPORT THƯ VIỆN ---
 import { ref, computed, onMounted, reactive, onBeforeUnmount } from 'vue';
 import { io } from 'socket.io-client';
 import Swal from 'sweetalert2';
+import { QuillEditor } from '@vueup/vue-quill';
+import '@vueup/vue-quill/dist/vue-quill.snow.css';
 
-// --- CẤU HÌNH TOAST ---
+// --- 2. CẤU HÌNH TOAST (Thông báo góc màn hình) ---
 const Toast = Swal.mixin({
   toast: true,
   position: 'top-end',
@@ -16,44 +19,51 @@ const Toast = Swal.mixin({
   }
 });
 
-// --- SOCKET.IO CLIENT ---
-let socket = null;
+// --- 3. KHAI BÁO BIẾN TRẠNG THÁI (STATE) ---
+let socket = null; // Biến giữ kết nối Socket.IO
 
-// --- STATE ---
+// Dữ liệu API và trạng thái tải
 const apiResponse = ref(null);
 const isLoading = ref(false);
 const isSubmitting = ref(false);
+
+// Bộ lọc và Phân trang
 const currentPage = ref(1);
 const searchQuery = ref("");
 const filterStatus = ref("");
 const categories = ref([]); 
 
+// Ref tham chiếu đến input file để reset sau khi upload
 const fileInput = ref(null);
 
-// Modal State
+// Trạng thái Modal (Ẩn/Hiện, Chế độ xem/thêm/sửa)
 const isModalVisible = ref(false);
 const modalMode = ref('view');
 
-// Form Data
+// Dữ liệu Form (Dùng cho Thêm và Sửa)
 const formData = reactive({
   id: null,
   name: '',
   price: 0,
+  quantity: 0,
   description: '',
   category_id: null, 
   images: [],
-  imageFiles: [],
+  imageFiles: [], // File gốc để upload
   status: 1
 });
 
-// State lỗi (Validation)
+// Biến lưu lỗi Validation
 const errors = reactive({
   name: '',
   price: '',
+  quantity: '',
   category_id: ''
 });
 
-// --- HELPER FUNCTION ---
+// --- 4. CÁC HÀM TIỆN ÍCH (HELPER) ---
+
+// Loại bỏ thẻ HTML để hiển thị mô tả ngắn gọn trên bảng
 const stripHtml = (html) => {
   if (!html) return "Chưa có mô tả";
   const tmp = document.createElement("DIV");
@@ -63,30 +73,66 @@ const stripHtml = (html) => {
   return text.length > 60 ? text.substring(0, 60) + "..." : text;
 };
 
-// --- VALIDATION ---
+// Format tiền tệ (VNĐ)
+const formatPrice = (price) => {
+  if (typeof price !== "number") return "0 ₫";
+  return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(price);
+};
+
+// Tạo ảnh placeholder nếu lỗi hoặc chưa có ảnh
+const placeholderImage = (name = "IMG") => {
+  if (!name) name = "Sp";
+  return `https://placehold.co/100x100/f3f4f6/9ca3af?text=${encodeURI(name.substring(0, 3).toUpperCase())}`;
+};
+
+// Xử lý khi ảnh bị lỗi (gắn ảnh mặc định)
+const handleImageError = (event) => {
+  if (event.target.src !== placeholderImage("ERR")) {
+    event.target.src = placeholderImage("ERR");
+  }
+};
+
+// --- 5. VALIDATION (KIỂM TRA DỮ LIỆU) ---
 const validateForm = () => {
   let isValid = true;
   
   // Reset lỗi cũ
   errors.name = '';
   errors.price = '';
+  errors.quantity = '';
   errors.category_id = '';
 
-  // 1. Validate Tên
-  if (!formData.name || formData.name.trim() === '') {
-    errors.name = 'Vui lòng nhập tên sản phẩm.';
+  // Kiểm tra Tên
+  if (!formData.name || String(formData.name).trim() === '') {
+    errors.name = 'Tên sản phẩm không được để trống.';
     isValid = false;
   }
 
-  // 2. Validate Giá
-  if (formData.price === '' || formData.price === null) {
+  // Kiểm tra Giá (Phải là số, không âm)
+  if (formData.price === '' || formData.price === null || formData.price === undefined) {
     errors.price = 'Vui lòng nhập giá bán.';
+    isValid = false;
+  } else if (isNaN(Number(formData.price))) {
+    errors.price = 'Giá bán phải là số hợp lệ.';
     isValid = false;
   } else if (Number(formData.price) < 0) {
     errors.price = 'Giá bán không được nhỏ hơn 0.';
     isValid = false;
   }
 
+  // Kiểm tra Số lượng (Phải là số, không âm)
+  if (formData.quantity === '' || formData.quantity === null || formData.quantity === undefined) {
+    errors.quantity = 'Vui lòng nhập số lượng.';
+    isValid = false;
+  } else if (isNaN(Number(formData.quantity))) {
+    errors.quantity = 'Số lượng phải là số hợp lệ.';
+    isValid = false;
+  } else if (Number(formData.quantity) < 0) {
+    errors.quantity = 'Số lượng không được nhỏ hơn 0.';
+    isValid = false;
+  }
+
+  // Kiểm tra Danh mục
   if (!formData.category_id) {
     errors.category_id = 'Vui lòng chọn danh mục.';
     isValid = false;
@@ -95,12 +141,14 @@ const validateForm = () => {
   return isValid;
 };
 
-// Hàm xóa lỗi khi người dùng nhập liệu
+// Xóa lỗi khi người dùng bắt đầu nhập liệu lại
 const clearError = (field) => {
   if (errors[field]) errors[field] = '';
 };
 
-// --- COMPUTED ---
+// --- 6. COMPUTED (TÍNH TOÁN DỮ LIỆU) ---
+
+// Lọc danh sách sản phẩm theo Tìm kiếm và Trạng thái
 const products = computed(() => {
   let data = apiResponse.value?.data || [];
 
@@ -116,6 +164,7 @@ const products = computed(() => {
   return data;
 });
 
+// Thông tin phân trang
 const pageInfo = computed(() => {
   if (!apiResponse.value) return { page: 1, limit: 10, hasMore: false, total: 0 };
   return {
@@ -126,8 +175,9 @@ const pageInfo = computed(() => {
   };
 });
 
-// --- METHODS ---
+// --- 7. CÁC HÀM XỬ LÝ CHÍNH (METHODS) ---
 
+// Lấy danh sách danh mục để đổ vào Select box
 const fetchCategoriesForDropdown = async () => {
     try {
         const res = await fetch('/api/categories-all');
@@ -139,15 +189,13 @@ const fetchCategoriesForDropdown = async () => {
     }
 };
 
+// Xử lý chọn file ảnh (Preview ảnh ngay lập tức)
 const handleFileUpload = (event) => {
   const files = Array.from(event.target.files);
 
   files.forEach(file => {
     if (!file.type.startsWith('image/')) {
-      Toast.fire({
-        icon: 'error',
-        title: `${file.name} không phải là file ảnh!`
-      });
+      Toast.fire({ icon: 'error', title: `${file.name} không phải là file ảnh!` });
       return;
     }
     formData.imageFiles.push(file);
@@ -155,11 +203,13 @@ const handleFileUpload = (event) => {
   });
 };
 
+// Xóa ảnh khỏi danh sách upload
 const removeImage = (index) => {
   formData.images.splice(index, 1);
   formData.imageFiles.splice(index, 1);
 };
 
+// Lấy dữ liệu sản phẩm từ API
 const fetchData = async (page) => {
   if (isLoading.value) return;
   isLoading.value = true;
@@ -176,50 +226,50 @@ const fetchData = async (page) => {
   }
 };
 
-const prevPage = () => {
-  if (pageInfo.value.page > 1) fetchData(pageInfo.value.page - 1);
-};
+// Chuyển trang
+const prevPage = () => { if (pageInfo.value.page > 1) fetchData(pageInfo.value.page - 1); };
+const nextPage = () => { if (pageInfo.value.hasMore) fetchData(pageInfo.value.page + 1); };
 
-const nextPage = () => {
-  if (pageInfo.value.hasMore) fetchData(pageInfo.value.page + 1);
-};
-
+// Mở Modal (Reset form nếu là thêm mới, điền dữ liệu nếu là sửa/xem)
 const openModal = (mode, product = null) => {
   modalMode.value = mode;
-  if (fileInput.value) fileInput.value.value = null;
+  if (fileInput.value) fileInput.value.value = null; // Reset input file
 
-  // Reset errors khi mở modal
-  errors.name = '';
-  errors.price = '';
-  errors.category_id = '';
+  // Reset lỗi
+  errors.name = ''; errors.price = ''; errors.quantity = ''; errors.category_id = '';
 
   if (mode === 'add') {
-    Object.assign(formData, { id: null, name: '', price: 0, description: '', category_id: null, images: [], imageFiles: [], status: 1 });
+    // Reset form về rỗng
+    Object.assign(formData, { 
+      id: null, name: '', price: 0, quantity: 0, description: '', category_id: null, 
+      images: [], imageFiles: [], status: 1 
+    });
   } else if (product) {
+    // Đổ dữ liệu sản phẩm vào form
     const imgs = product.image ? product.image.split(",") : [];
     Object.assign(formData, {
       ...product,
       category_id: product.category_id,
+      quantity: product.quantity || 0,
       images: imgs,
       imageFiles: []
     });
     if (!formData.description) formData.description = '';
   }
   isModalVisible.value = true;
-  document.body.style.overflow = "hidden";
+  document.body.style.overflow = "hidden"; // Khóa cuộn body
 };
 
+// Đóng Modal
 const closeModal = () => {
   isModalVisible.value = false;
   document.body.style.overflow = "";
 };
 
+// Xử lý Submit Form (Thêm hoặc Sửa)
 const handleSubmit = async () => {
-  // GỌI HÀM VALIDATE TRƯỚC KHI XỬ LÝ
-  if (!validateForm()) {
-    // Toast.fire({ icon: 'warning', title: 'Vui lòng kiểm tra lại thông tin nhập!' });
-    return; 
-  }
+  // 1. Kiểm tra dữ liệu đầu vào
+  if (!validateForm()) return; 
 
   if (isSubmitting.value) return;
   isSubmitting.value = true;
@@ -228,31 +278,25 @@ const handleSubmit = async () => {
     const url = modalMode.value === 'add' ? '/api/products' : `/api/products/${formData.id}`;
     const method = modalMode.value === 'add' ? 'POST' : 'PUT';
 
+    // 2. Tạo FormData để gửi dữ liệu (bao gồm cả file)
     const payload = new FormData();
     payload.append('name', formData.name);
     payload.append('price', formData.price);
+    payload.append('quantity', formData.quantity);
     payload.append('description', formData.description || '');
     payload.append('status', formData.status);
-    
-    if(formData.category_id) {
-        payload.append('category_id', formData.category_id);
-    } else {
-        payload.append('category_id', 'null');
-    }
+    payload.append('category_id', formData.category_id || 'null');
 
+    // Xử lý ảnh: Nếu có ảnh mới thì gửi ảnh, không thì giữ ảnh cũ
     if (formData.imageFiles.length > 0) {
-      formData.imageFiles.forEach(file => {
-        payload.append('images', file);
-      });
+      formData.imageFiles.forEach(file => payload.append('images', file));
       payload.append('keepOldImages', 'false');
     } else {
       payload.append('keepOldImages', 'true');
     }
 
-    const res = await fetch(url, {
-      method: method,
-      body: payload
-    });
+    // 3. Gửi request lên Server
+    const res = await fetch(url, { method: method, body: payload });
 
     if (!res.ok) {
       const errData = await res.json();
@@ -260,7 +304,6 @@ const handleSubmit = async () => {
     }
 
     closeModal();
-
     Toast.fire({
       icon: 'success',
       title: modalMode.value === 'add' ? 'Thêm mới thành công!' : 'Cập nhật thành công!'
@@ -268,25 +311,20 @@ const handleSubmit = async () => {
 
   } catch (error) {
     console.error(error);
-    Swal.fire({
-      icon: 'error',
-      title: 'Đã xảy ra lỗi',
-      text: error.message,
-      confirmButtonColor: '#000'
-    });
+    Swal.fire({ icon: 'error', title: 'Đã xảy ra lỗi', text: error.message, confirmButtonColor: '#000' });
   } finally {
     isSubmitting.value = false;
   }
 };
 
+// Xử lý Xóa sản phẩm
 const handleDelete = async (product) => {
   const result = await Swal.fire({
     title: 'Bạn có chắc chắn?',
-    text: `Bạn muốn xóa sản phẩm "${product.name}"? Hành động này không thể hoàn tác!`,
+    text: `Bạn muốn xóa sản phẩm "${product.name}"?`,
     icon: 'warning',
     showCancelButton: true,
     confirmButtonColor: '#d33',
-    cancelButtonColor: '#3085d6',
     confirmButtonText: 'Vâng, xóa đi!',
     cancelButtonText: 'Hủy bỏ'
   });
@@ -296,53 +334,23 @@ const handleDelete = async (product) => {
   try {
     const res = await fetch(`/api/products/${product.id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error("Lỗi khi xóa sản phẩm");
-
-    Toast.fire({
-      icon: 'success',
-      title: 'Đã xóa sản phẩm!'
-    });
-
+    Toast.fire({ icon: 'success', title: 'Đã xóa sản phẩm!' });
   } catch (error) {
-    console.error(error);
-    Swal.fire({
-      icon: 'error',
-      title: 'Lỗi',
-      text: "Không thể xóa sản phẩm này.",
-      confirmButtonColor: '#000'
-    });
+    Swal.fire({ icon: 'error', title: 'Lỗi', text: "Không thể xóa sản phẩm này." });
   }
 };
 
-const formatPrice = (price) => {
-  if (typeof price !== "number") return "0 ₫";
-  return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(price);
-};
-
-const placeholderImage = (name = "IMG") => {
-  if (!name) name = "Sp";
-  return `https://placehold.co/100x100/f3f4f6/9ca3af?text=${encodeURI(name.substring(0, 3).toUpperCase())}`;
-};
-
-const handleImageError = (event) => {
-  if (event.target.src !== placeholderImage("ERR")) {
-    event.target.src = placeholderImage("ERR");
-  }
-};
-
+// --- 8. LIFECYCLE HOOKS (VÒNG ĐỜI) ---
 onMounted(() => {
   fetchData(currentPage.value);
   fetchCategoriesForDropdown();
   
+  // Kết nối Socket.IO để nhận lệnh làm mới dữ liệu realtime
   socket = io("http://localhost:8080");
-  socket.on("connect", () => { console.log("✅ Socket connected:", socket.id); });
   socket.on("REFRESH_DATA", () => {
     console.log("📡 Nhận tín hiệu REFRESH_DATA");
     fetchData(currentPage.value);
   });
-  // socket.on("REFRESH_CATEGORIES", () => {
-  //     fetchCategoriesForDropdown();
-  // });
-  socket.on("disconnect", () => { console.log("❌ Socket disconnected"); });
 });
 
 onBeforeUnmount(() => {
@@ -353,7 +361,7 @@ onBeforeUnmount(() => {
 <template>
   <div>
 
-    <!-- 1. Header & Actions -->
+    <!-- 1. HEADER & NÚT THÊM MỚI -->
     <div class="flex flex-col sm:flex-row justify-between items-end sm:items-center mb-6 gap-4">
       <div>
         <h1 class="text-2xl font-bold text-gray-900 tracking-tight">Danh sách sản phẩm</h1>
@@ -365,9 +373,10 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- 2. Filters & Search -->
+    <!-- 2. THANH TÌM KIẾM & LỌC -->
     <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6">
       <div class="flex flex-col md:flex-row gap-4">
+        <!-- Input Tìm kiếm -->
         <div class="flex-1 relative">
           <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
             <i class="fa-solid fa-magnifying-glass"></i>
@@ -377,6 +386,7 @@ onBeforeUnmount(() => {
             placeholder="Tìm kiếm theo tên sản phẩm..." />
         </div>
 
+        <!-- Dropdown Lọc trạng thái -->
         <div class="w-full md:w-64">
           <div class="relative">
             <select v-model="filterStatus"
@@ -393,7 +403,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 3. Table Data -->
+    <!-- 3. BẢNG DỮ LIỆU -->
     <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full whitespace-nowrap text-left text-sm">
@@ -401,6 +411,7 @@ onBeforeUnmount(() => {
             <tr>
               <th class="px-6 py-4">Sản phẩm</th>
               <th class="px-6 py-4">Danh mục</th>
+              <th class="px-6 py-4">Kho</th> <!-- Cột Số lượng -->
               <th class="px-6 py-4">Giá bán</th>
               <th class="px-6 py-4">Trạng thái</th>
               <th class="px-6 py-4 text-right">Hành động</th>
@@ -408,21 +419,23 @@ onBeforeUnmount(() => {
           </thead>
 
           <tbody class="divide-y divide-gray-100">
-
+            <!-- Loading -->
             <tr v-if="isLoading">
-              <td colspan="5" class="px-6 py-10 text-center text-gray-400">
+              <td colspan="6" class="px-6 py-10 text-center text-gray-400">
                 <i class="fa-solid fa-circle-notch fa-spin text-2xl mb-2"></i>
                 <p>Đang tải dữ liệu...</p>
               </td>
             </tr>
 
+            <!-- Không có dữ liệu -->
             <tr v-else-if="products.length === 0">
-              <td colspan="5" class="px-6 py-10 text-center text-gray-400">
+              <td colspan="6" class="px-6 py-10 text-center text-gray-400">
                 <i class="fa-solid fa-box-open text-4xl mb-2 text-gray-300"></i>
                 <p>Không tìm thấy sản phẩm nào.</p>
               </td>
             </tr>
 
+            <!-- Hiển thị danh sách -->
             <tr v-else v-for="product in products" :key="product.id" class="hover:bg-gray-50 transition">
               <td class="px-6 py-4">
                 <div class="flex items-center gap-4 group cursor-pointer" @click="openModal('view', product)">
@@ -444,6 +457,10 @@ onBeforeUnmount(() => {
                       {{ product.category_name }}
                   </span>
                   <span v-else class="text-gray-400 italic text-xs">Chưa phân loại</span>
+              </td>
+
+              <td class="px-6 py-4 font-medium text-gray-700">
+                  {{ product.quantity || 0 }}
               </td>
 
               <td class="px-6 py-4 font-medium text-gray-900">
@@ -476,6 +493,7 @@ onBeforeUnmount(() => {
         </table>
       </div>
 
+      <!-- Phân trang -->
       <div v-if="!isLoading && apiResponse"
         class="bg-gray-50 px-6 py-4 border-t border-gray-200 flex items-center justify-between">
         <span class="text-xs text-gray-500">
@@ -494,13 +512,13 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 4. MODAL -->
+    <!-- 4. MODAL POPUP (XEM / THÊM / SỬA) -->
     <div v-if="isModalVisible" class="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div @click="closeModal" class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"></div>
 
-      <div
-        class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-fade-in-up">
-
+      <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-fade-in-up">
+        
+        <!-- Header Modal -->
         <div class="sticky top-0 bg-white px-6 py-4 border-b border-gray-100 flex justify-between items-center z-10">
           <h3 class="text-lg font-bold text-gray-900">
             {{ modalMode === 'view' ? 'Chi tiết sản phẩm' : modalMode === 'add' ? 'Thêm mới' : 'Cập nhật' }}
@@ -513,7 +531,7 @@ onBeforeUnmount(() => {
 
         <div class="p-6">
 
-          <!-- VIEW MODE -->
+          <!-- CHẾ ĐỘ XEM CHI TIẾT -->
           <div v-if="modalMode === 'view'" class="space-y-4">
             <!-- Ảnh -->
             <div v-if="formData.images.length > 0" class="grid gap-2" :class="{
@@ -534,10 +552,14 @@ onBeforeUnmount(() => {
               <p class="text-lg font-bold text-gray-900">{{ formData.name }}</p>
             </div>
 
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-3 gap-4">
               <div>
                 <label class="text-xs font-bold text-gray-400 uppercase">Giá</label>
                 <p class="text-xl font-bold">{{ formatPrice(formData.price) }}</p>
+              </div>
+              <div>
+                 <label class="text-xs font-bold text-gray-400 uppercase">Số lượng</label>
+                 <p class="font-medium text-gray-800">{{ formData.quantity }}</p>
               </div>
               <div>
                   <label class="text-xs font-bold text-gray-400 uppercase">Danh mục</label>
@@ -564,12 +586,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- FORM (ADD / EDIT) -->
+          <!-- FORM NHẬP LIỆU (THÊM / SỬA) -->
           <form v-else @submit.prevent="handleSubmit" class="space-y-5" novalidate>
-            <!-- 
-                Đã bỏ thuộc tính 'required' ở các input
-                Thay vào đó là hiển thị lỗi từ biến 'errors'
-            -->
             
             <!-- TÊN SẢN PHẨM -->
             <div>
@@ -600,8 +618,25 @@ onBeforeUnmount(() => {
                 <span v-if="errors.price" class="text-red-500 text-xs mt-1 block">{{ errors.price }}</span>
               </div>
               
-              <!-- SELECT DANH MỤC -->
+              <!-- SỐ LƯỢNG -->
               <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Số lượng <span
+                    class="text-red-500">*</span></label>
+                <input 
+                    v-model.number="formData.quantity" 
+                    type="number" 
+                    min="0"
+                    @input="clearError('quantity')"
+                    :class="{'border-red-500 focus:border-red-500 focus:ring-red-200': errors.quantity}"
+                    class="w-full px-4 py-2 border rounded-lg focus:border-black focus:ring-1 focus:ring-black outline-none transition" 
+                />
+                <span v-if="errors.quantity" class="text-red-500 text-xs mt-1 block">{{ errors.quantity }}</span>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-5">
+               <!-- SELECT DANH MỤC -->
+               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">Danh Mục</label>
                 <select 
                     v-model="formData.category_id"
@@ -615,15 +650,16 @@ onBeforeUnmount(() => {
                 </select>
                 <span v-if="errors.category_id" class="text-red-500 text-xs mt-1 block">{{ errors.category_id }}</span>
               </div>
-            </div>
 
-            <div>
-                 <label class="block text-sm font-medium text-gray-700 mb-1">Trạng Thái</label>
-                <select v-model="formData.status"
-                  class="w-full px-4 py-2 border rounded-lg focus:border-black outline-none bg-white">
-                  <option :value="1">Đang bán</option>
-                  <option :value="0">Hết hàng</option>
-                </select>
+               <!-- TRẠNG THÁI -->
+               <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Trạng Thái</label>
+                 <select v-model="formData.status"
+                   class="w-full px-4 py-2 border rounded-lg focus:border-black outline-none bg-white">
+                   <option :value="1">Đang bán</option>
+                   <option :value="0">Hết hàng</option>
+                 </select>
+               </div>
             </div>
 
             <!-- Upload nhiều ảnh -->
@@ -652,6 +688,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
+            <!-- Nút Hành Động -->
             <div class="pt-4 border-t flex justify-end gap-3">
               <button type="button" @click="closeModal"
                 class="px-5 py-2.5 rounded-lg border text-gray-700 hover:bg-gray-50">Hủy</button>
@@ -671,15 +708,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 @keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .animate-fade-in-up {
