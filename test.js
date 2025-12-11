@@ -77,7 +77,88 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, file.mimetype.startsWith("image/")),
 });
 
-// --- API SẢN PHẨM ---
+// --- API QUẢN LÝ ĐƠN HÀNG ---
+
+// Lấy danh sách đơn hàng 
+app.get("/api/orders", async (req, res) => {
+  try {
+    const page = +req.query.page || 1;
+    const limit = +req.query.limit || 10;
+    const offset = (page - 1) * limit;
+    const search = req.query.search || "";
+    const status = req.query.status || "";
+
+    let whereSql = "WHERE 1=1";
+    if (search) {
+      whereSql += ` AND (customer_name LIKE '%${search}%' OR customer_phone LIKE '%${search}%' OR id LIKE '%${search}%')`;
+    }
+    if (status) {
+      whereSql += ` AND status = '${status}'`;
+    }
+
+    // Đếm tổng số đơn
+    const [count] = await db(
+      `SELECT COUNT(*) as total FROM orders ${whereSql}`
+    );
+
+    // Lấy danh sách đơn
+    const orders = await db(
+      `SELECT * FROM orders ${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+
+    // Lấy chi tiết sản phẩm 
+    for (let order of orders) {
+      const items = await db(
+        `
+        SELECT oi.*, p.name as product_name, p.image 
+        FROM order_items oi
+        JOIN sanpham p ON oi.product_id = p.id
+        WHERE oi.order_id = ?
+      `,
+        [order.id]
+      );
+
+      // Format lại ảnh sản phẩm
+      order.items = items.map((i) => ({
+        ...i,
+        image: i.image
+          ? formatImg(i.image.split(",")[0])
+          : "https://placehold.co/50x50",
+      }));
+    }
+
+    res.json({
+      data: orders,
+      total: count.total,
+      page,
+      limit,
+      totalPages: Math.ceil(count.total / limit),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 2. Cập nhật trạng thái đơn hàng
+app.put("/api/orders/:id", async (req, res) => {
+  try {
+    const { status } = req.body;
+    const { id } = req.params;
+
+    await db("UPDATE orders SET status = ? WHERE id = ?", [status, id]);
+
+    // Emit sự kiện socket để frontend cập nhật realtime
+    io.emit("ORDER_UPDATED", { id, status });
+
+    res.json({ message: "Cập nhật trạng thái thành công" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// trang home
 
 app.get("/api/home", async (req, res) => {
   try {
@@ -291,15 +372,13 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-// --- GIỎ HÀNG (QUAN TRỌNG: ĐÃ CẬP NHẬT LOGIC CHECK TỒN KHO) ---
+// --- GIỎ HÀNG ---
 
-// 1. Thêm vào giỏ hàng
 app.post("/api/cart", async (req, res) => {
   try {
     const { user_id, product_id, quantity } = req.body;
     const addQty = Number(quantity);
 
-    // B1: Lấy thông tin sản phẩm để biết tồn kho thực tế
     const [product] = await db("SELECT quantity FROM sanpham WHERE id = ?", [
       product_id,
     ]);
@@ -310,19 +389,16 @@ app.post("/api/cart", async (req, res) => {
 
     const stock = product.quantity || 0;
 
-    // B2: Kiểm tra xem user đã có sản phẩm này trong giỏ chưa
     const [existingItem] = await db(
       "SELECT * FROM carts WHERE user_id = ? AND product_id = ?",
       [user_id, product_id]
     );
 
-    // B3: Tính toán số lượng dự kiến sau khi thêm
     let newTotalQty = addQty;
     if (existingItem) {
       newTotalQty += existingItem.quantity;
     }
 
-    // B4: CHECK TỒN KHO - Nếu vượt quá thì báo lỗi luôn
     if (newTotalQty > stock) {
       return res.status(400).json({
         error: `Kho chỉ còn ${stock} sản phẩm. Bạn đã có ${
@@ -331,7 +407,6 @@ app.post("/api/cart", async (req, res) => {
       });
     }
 
-    // B5: Thực hiện Insert hoặc Update nếu đủ hàng
     if (existingItem) {
       await db("UPDATE carts SET quantity = ? WHERE id = ?", [
         newTotalQty,
@@ -351,12 +426,10 @@ app.post("/api/cart", async (req, res) => {
   }
 });
 
-// 2. Lấy danh sách giỏ hàng (Cập nhật: Lấy thêm cột quantity của sản phẩm làm product_stock)
 app.get("/api/cart/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Đã thêm: p.quantity as product_stock để frontend biết giới hạn
     const sql = `
       SELECT c.id as cart_id, c.quantity as cart_quantity, 
              p.id as product_id, p.name, p.price, p.image, 
@@ -382,18 +455,16 @@ app.get("/api/cart/:userId", async (req, res) => {
   }
 });
 
-// 3. Cập nhật số lượng trong giỏ (Cập nhật: Check tồn kho trước khi update)
 app.put("/api/cart/:id", async (req, res) => {
   try {
     const cartId = req.params.id;
-    const newQuantity = Number(req.body.quantity); // Số lượng mới mà khách muốn set
+    const newQuantity = Number(req.body.quantity);
 
     if (newQuantity <= 0) {
       await db("DELETE FROM carts WHERE id = ?", [cartId]);
       return res.json({ message: "Đã xóa khỏi giỏ hàng" });
     }
 
-    // B1: Lấy thông tin giỏ hàng hiện tại + tồn kho sản phẩm tương ứng
     const sqlCheck = `
         SELECT c.*, p.quantity as product_stock 
         FROM carts c
@@ -406,14 +477,12 @@ app.put("/api/cart/:id", async (req, res) => {
       return res.status(404).json({ error: "Mục giỏ hàng không tồn tại" });
     }
 
-    // B2: CHECK TỒN KHO
     if (newQuantity > cartItem.product_stock) {
       return res.status(400).json({
         error: `Số lượng vượt quá tồn kho! (Còn lại: ${cartItem.product_stock})`,
       });
     }
 
-    // B3: Update nếu hợp lệ
     await db("UPDATE carts SET quantity = ? WHERE id = ?", [
       newQuantity,
       cartId,
@@ -446,24 +515,18 @@ app.post("/api/checkout", async (req, res) => {
       total_money,
     } = req.body;
 
-    // 1. Tạo đơn hàng (Bảng orders)
-    // Lưu ý: bảng orders liên kết user_id với bảng users
     const orderResult = await db(
       "INSERT INTO orders (user_id, customer_name, customer_phone, customer_address, total_money, status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', NOW())",
       [user_id, customer_name, customer_phone, customer_address, total_money]
     );
     const orderId = orderResult.insertId;
 
-    // 2. Lưu chi tiết đơn hàng VÀ Trừ tồn kho
-    // Sử dụng Promise.all để đảm bảo tất cả lệnh chạy xong mới phản hồi
     const promises = items.map(async (item) => {
-      // Lưu vào order_items (liên kết order_id)
       await db(
         "INSERT INTO order_items (order_id, product_id, quantity, price) VALUES (?, ?, ?, ?)",
         [orderId, item.product_id, item.cart_quantity, item.price]
       );
 
-      // Trừ tồn kho trong bảng sanpham
       await db("UPDATE sanpham SET quantity = quantity - ? WHERE id = ?", [
         item.cart_quantity,
         item.product_id,
@@ -472,10 +535,8 @@ app.post("/api/checkout", async (req, res) => {
 
     await Promise.all(promises);
 
-    // 3. Xóa giỏ hàng của user sau khi đặt xong
     await db("DELETE FROM carts WHERE user_id = ?", [user_id]);
 
-    // Gửi thông báo realtime (nếu sau này bạn làm admin)
     io.emit("NEW_ORDER", { orderId, total_money, customer_name });
 
     res.status(200).json({ message: "Đặt hàng thành công!", orderId });
