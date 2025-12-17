@@ -58,6 +58,7 @@ const formatImg = (str) =>
       : `http://localhost:${port}/uploads/${str}`
     : "";
 
+// Hàm xóa ảnh vật lý (Chỉ dùng khi cần xóa cứng hoặc dọn dẹp)
 const deleteImg = (name) => {
   const file = path.join(uploadDir, name.trim());
   if (fs.existsSync(file)) fs.unlinkSync(file);
@@ -79,7 +80,7 @@ const upload = multer({
 
 // --- API QUẢN LÝ ĐƠN HÀNG ---
 
-// Lấy danh sách đơn hàng 
+// Lấy danh sách đơn hàng
 app.get("/api/orders", async (req, res) => {
   try {
     const page = +req.query.page || 1;
@@ -107,7 +108,7 @@ app.get("/api/orders", async (req, res) => {
       [limit, offset]
     );
 
-    // Lấy chi tiết sản phẩm 
+    // Lấy chi tiết sản phẩm (Giữ nguyên logic JOIN để xem lịch sử ngay cả khi SP đã bị xóa mềm)
     for (let order of orders) {
       const items = await db(
         `
@@ -158,7 +159,7 @@ app.put("/api/orders/:id", async (req, res) => {
   }
 });
 
-// trang home
+// --- API SẢN PHẨM (ĐÃ CẬP NHẬT XÓA MỀM) ---
 
 app.get("/api/home", async (req, res) => {
   try {
@@ -166,9 +167,13 @@ app.get("/api/home", async (req, res) => {
     const limit = +req.query.limit || 10;
     const offset = (page - 1) * limit;
 
-    const [count] = await db("SELECT COUNT(*) as total FROM sanpham");
+    // Chỉ đếm sản phẩm chưa bị xóa
+    const [count] = await db("SELECT COUNT(*) as total FROM sanpham WHERE deleted_at IS NULL");
+    
+    // Chỉ lấy sản phẩm chưa bị xóa
     const sql = `SELECT s.*, c.name as category_name FROM sanpham s 
                  LEFT JOIN categories c ON s.category_id = c.id 
+                 WHERE s.deleted_at IS NULL
                  ORDER BY s.id DESC LIMIT ? OFFSET ?`;
     const rows = await db(sql, [limit, offset]);
 
@@ -184,12 +189,13 @@ app.get("/api/home", async (req, res) => {
 
 app.get("/api/products/:id", async (req, res) => {
   try {
-    const rows = await db("SELECT * FROM sanpham WHERE id = ?", [
+    // Chỉ lấy nếu chưa bị xóa
+    const rows = await db("SELECT * FROM sanpham WHERE id = ? AND deleted_at IS NULL", [
       req.params.id,
     ]);
     rows.length
       ? res.json(rows[0])
-      : res.status(404).json({ error: "Not found" });
+      : res.status(404).json({ error: "Sản phẩm không tồn tại hoặc đã bị xóa" });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -202,7 +208,7 @@ app.post("/api/products", upload.array("images", 5), async (req, res) => {
     const images = req.files.map((f) => f.filename).join(",");
 
     await db(
-      "INSERT INTO sanpham (name, price, description, image, status, category_id, quantity) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO sanpham (name, price, description, image, status, category_id, quantity, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
       [
         name,
         price,
@@ -234,7 +240,7 @@ app.put("/api/products/:id", upload.array("images", 5), async (req, res) => {
       quantity,
     } = req.body;
 
-    const [oldData] = await db("SELECT image FROM sanpham WHERE id=?", [id]);
+    const [oldData] = await db("SELECT image FROM sanpham WHERE id=? AND deleted_at IS NULL", [id]);
     if (!oldData) return res.status(404).json({ error: "Not found" });
 
     let oldImgs = oldData.image ? oldData.image.split(",") : [];
@@ -268,27 +274,32 @@ app.put("/api/products/:id", upload.array("images", 5), async (req, res) => {
   }
 });
 
+// DELETE: Chuyển sang XÓA MỀM (Soft Delete)
 app.delete("/api/products/:id", async (req, res) => {
   try {
-    const [row] = await db("SELECT image FROM sanpham WHERE id=?", [
+    const [row] = await db("SELECT id FROM sanpham WHERE id=? AND deleted_at IS NULL", [
       req.params.id,
     ]);
-    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!row) return res.status(404).json({ error: "Sản phẩm không tồn tại" });
 
-    await db("DELETE FROM sanpham WHERE id=?", [req.params.id]);
-    if (row.image) row.image.split(",").forEach(deleteImg);
-
+    // Cập nhật deleted_at = thời gian hiện tại
+    await db("UPDATE sanpham SET deleted_at = NOW() WHERE id=?", [req.params.id]);
+    
+    // Lưu ý: Không xóa ảnh vật lý nữa vì đây là xóa mềm, có thể khôi phục lại.
+    
     io.emit("REFRESH_DATA");
-    res.json({ message: "Đã xóa" });
+    res.json({ message: "Đã xóa sản phẩm (chuyển vào thùng rác)" });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// --- API DANH MỤC ---
+// --- API DANH MỤC (ĐÃ CẬP NHẬT XÓA MỀM) ---
+
 app.get("/api/categories-all", async (req, res) => {
+  // Chỉ lấy danh mục chưa xóa
   const data = await db(
-    "SELECT id, name FROM categories WHERE status='active' ORDER BY name ASC"
+    "SELECT id, name FROM categories WHERE status='active' AND deleted_at IS NULL ORDER BY name ASC"
   );
   res.json(data);
 });
@@ -298,7 +309,10 @@ app.get("/api/categories", async (req, res) => {
     limit = +req.query.limit || 10,
     search = req.query.search || "";
   const offset = (page - 1) * limit;
-  const where = search ? `WHERE name LIKE '%${search}%'` : "";
+  
+  // Base Where clause bao gồm check deleted_at
+  let where = "WHERE deleted_at IS NULL";
+  if (search) where += ` AND name LIKE '%${search}%'`;
 
   const [count] = await db(`SELECT COUNT(*) as total FROM categories ${where}`);
   const data = await db(
@@ -328,9 +342,10 @@ app.put("/api/categories/:id", async (req, res) => {
   res.json({ message: "Đã sửa" });
 });
 
+// DELETE Category: Chuyển sang XÓA MỀM
 app.delete("/api/categories/:id", async (req, res) => {
-  await db("DELETE FROM categories WHERE id=?", [req.params.id]);
-  res.json({ message: "Đã xóa" });
+  await db("UPDATE categories SET deleted_at = NOW() WHERE id=?", [req.params.id]);
+  res.json({ message: "Đã xóa danh mục (chuyển vào thùng rác)" });
 });
 
 // --- AUTH ---
@@ -372,19 +387,20 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-// --- GIỎ HÀNG ---
+// --- GIỎ HÀNG (CẬP NHẬT CHECK XÓA MỀM) ---
 
 app.post("/api/cart", async (req, res) => {
   try {
     const { user_id, product_id, quantity } = req.body;
     const addQty = Number(quantity);
 
-    const [product] = await db("SELECT quantity FROM sanpham WHERE id = ?", [
+    // Kiểm tra sản phẩm có tồn tại VÀ chưa bị xóa mềm
+    const [product] = await db("SELECT quantity FROM sanpham WHERE id = ? AND deleted_at IS NULL", [
       product_id,
     ]);
 
     if (!product) {
-      return res.status(404).json({ error: "Sản phẩm không tồn tại" });
+      return res.status(404).json({ error: "Sản phẩm không tồn tại hoặc ngừng kinh doanh" });
     }
 
     const stock = product.quantity || 0;
@@ -430,6 +446,7 @@ app.get("/api/cart/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
+    // Chỉ hiển thị trong giỏ hàng nếu sản phẩm CHƯA bị xóa mềm
     const sql = `
       SELECT c.id as cart_id, c.quantity as cart_quantity, 
              p.id as product_id, p.name, p.price, p.image, 
@@ -438,7 +455,7 @@ app.get("/api/cart/:userId", async (req, res) => {
       FROM carts c
       JOIN sanpham p ON c.product_id = p.id
       LEFT JOIN categories cate ON p.category_id = cate.id
-      WHERE c.user_id = ?
+      WHERE c.user_id = ? AND p.deleted_at IS NULL
     `;
     const rows = await db(sql, [userId]);
 
@@ -469,12 +486,13 @@ app.put("/api/cart/:id", async (req, res) => {
         SELECT c.*, p.quantity as product_stock 
         FROM carts c
         JOIN sanpham p ON c.product_id = p.id
-        WHERE c.id = ?
+        WHERE c.id = ? AND p.deleted_at IS NULL
     `;
     const [cartItem] = await db(sqlCheck, [cartId]);
 
     if (!cartItem) {
-      return res.status(404).json({ error: "Mục giỏ hàng không tồn tại" });
+      await db("DELETE FROM carts WHERE id = ?", [cartId]);
+      return res.status(404).json({ error: "Sản phẩm không còn tồn tại" });
     }
 
     if (newQuantity > cartItem.product_stock) {
